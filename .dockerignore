@@ -7,3 +7,16 @@
 **/dist
 data
 .DS_Store
+
+downloads
+vespertape-ui-design-system.html
+web/test-results
+web/playwright-report
+
+.env.*
+!.env.example
+**/.venv
+**/.pytest_cache
+**/.ruff_cache
+.github
+docs
