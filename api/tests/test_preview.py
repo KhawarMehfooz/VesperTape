@@ -26,6 +26,8 @@ class PreviewTests(unittest.TestCase):
             result = extract_preview('https://example.com/video')
             downloader.extract_info.assert_called_once_with('https://example.com/video', download=False)
             self.assertTrue(factory.call_args.args[0]['skip_download'])
+            self.assertEqual(factory.call_args.args[0]['js_runtimes'], {'node': {}})
+            self.assertFalse(factory.call_args.args[0].get('ignore_no_formats_error', False))
             return result
 
     def test_video_metadata_and_formats(self):
@@ -51,7 +53,7 @@ class PreviewTests(unittest.TestCase):
         self.assertIsNone(result.items[0].thumbnail_url)
 
     def test_errors_are_classified_without_leaking_details(self):
-        for message, code in [('Unsupported URL: secret', 'unsupported_link'), ('Video is private: secret', 'private_link'), ('network secret', 'preview_failed')]:
+        for message, code in [('Unsupported URL: secret', 'unsupported_link'), ('Video is private: secret', 'private_link'), ('network secret', 'preview_failed'), ('Sign in to confirm you’re not a bot: secret', 'youtube_verification_required'), ('HTTP Error 429: Too Many Requests: secret', 'source_rate_limited')]:
             with self.subTest(code=code), self.assertRaises(ApiException) as caught:
                 self.extract(error=DownloadError(message))
             self.assertEqual(caught.exception.error.code, code)
@@ -76,12 +78,12 @@ class PreviewTests(unittest.TestCase):
     def test_endpoint_contract_and_validation(self):
         from api.main import app
         with patch('api.main.extract_preview', return_value=self.extract(VIDEO)):
-            start, payload = asyncio.run(call(app, '/api/preview', 'POST', json.dumps({'url': 'https://example.com/video'}).encode()))
+            start, payload = asyncio.run(call(app, '/api/preview', 'POST', json.dumps({'url': 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'}).encode()))
         self.assertEqual(start['status'], 200)
         self.assertEqual(payload['items'][0]['title'], 'A video')
         start, payload = asyncio.run(call(app, '/api/preview', 'POST', b'{"url":"file:///tmp/video"}'))
         self.assertEqual(start['status'], 422)
         self.assertEqual(payload['error']['code'], 'validation_error')
         with patch('api.preview.socket.getaddrinfo', return_value=[(2, 1, 6, '', ('127.0.0.1', 80))]):
-            start, payload = asyncio.run(call(app, '/api/preview', 'POST', b'{"url":"http://localhost"}'))
+            start, payload = asyncio.run(call(app, '/api/preview', 'POST', b'{"url":"https://www.youtube.com/watch?v=dQw4w9WgXcQ"}'))
         self.assertEqual(payload['error']['code'], 'blocked_target')

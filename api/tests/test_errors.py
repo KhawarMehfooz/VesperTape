@@ -77,7 +77,7 @@ class ErrorTests(unittest.TestCase):
             self.assertNotIn("secret-password", json.dumps(payload))
 
     def test_disabled_options_use_same_envelope(self):
-        start, payload = asyncio.run(call(self.app, "/validate", "POST", b'{"url":"https://example.com"}'))
+        start, payload = asyncio.run(call(self.app, "/validate", "POST", b'{"url":"https://www.youtube.com/watch?v=dQw4w9WgXcQ"}'))
         self.assertEqual(start["status"], 422)
         self.assertEqual(payload["error"]["details"][0]["location"], ["body", "settings", "mode"])
 
@@ -97,11 +97,11 @@ class ErrorTests(unittest.TestCase):
             {"settings": {"destination": "/tmp"}},
         ):
             with self.subTest(payload=payload), self.assertRaises(ValidationError):
-                CreateJobRequest.model_validate({"url": "https://example.com", **payload})
-        for url in ("file:///tmp/video", "https://user:secret@example.com", "https://example.com:bad", "https://exa mple.com"):
+                CreateJobRequest.model_validate({"url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ", **payload})
+        for url in ("file:///tmp/video", "https://user:secret@example.com", "https://youtube.com:bad/watch?v=dQw4w9WgXcQ", "https://exa mple.com"):
             with self.subTest(url=url), self.assertRaises(ValidationError):
                 PreviewRequest(url=url)
-        self.assertEqual(PreviewRequest(url=" https://example.com ").url, "https://example.com")
+        self.assertEqual(PreviewRequest(url=" https://www.youtube.com/watch?v=dQw4w9WgXcQ ").url, "https://www.youtube.com/watch?v=dQw4w9WgXcQ")
 
     def test_production_routes_and_documented_errors(self):
         from api.main import app

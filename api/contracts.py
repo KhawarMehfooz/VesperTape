@@ -9,6 +9,11 @@ from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+if __package__:
+    from .youtube import validate_youtube_url
+else:
+    from youtube import validate_youtube_url
+
 DownloadMode = Literal["video", "audio"]
 DownloadQuality = Literal["best", "1080p", "720p", "480p"]
 DownloadFormat = Literal["auto", "mp4", "webm", "mp3", "m4a", "flac", "wav"]
@@ -44,7 +49,10 @@ class UrlRequest(Contract):
 
 
 class PreviewRequest(UrlRequest):
-    pass
+    @field_validator("url")
+    @classmethod
+    def youtube_link(cls, value: str) -> str:
+        return validate_youtube_url(value)
 
 
 class MediaFormat(Contract):
@@ -128,6 +136,11 @@ class SettingsResponse(Contract):
 
 
 class CreateJobRequest(UrlRequest):
+    @field_validator("url")
+    @classmethod
+    def youtube_link(cls, value: str) -> str:
+        return validate_youtube_url(value)
+
     selection: PlaylistSelection = Field(default_factory=PlaylistSelection)
     settings: DownloadSettings = Field(default_factory=DownloadSettings)
 

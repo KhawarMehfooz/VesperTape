@@ -26,7 +26,7 @@ class QueueTests(unittest.TestCase):
         self.store = JobStore(self.database)
 
     def enqueue(self, **kwargs):
-        return self.store.create(CreateJobRequest(url='https://example.com/video', **kwargs))
+        return self.store.create(CreateJobRequest(url='https://www.youtube.com/watch?v=dQw4w9WgXcQ', **kwargs))
 
     def test_atomic_claims_and_fifo(self):
         jobs = [self.enqueue() for _ in range(12)]
@@ -164,6 +164,7 @@ class QueueTests(unittest.TestCase):
         self.assertEqual(options['playlist_items'], '2,4')
         self.assertEqual(options['postprocessors'][0]['preferredcodec'], 'mp3')
         self.assertTrue(options['continuedl'])
+        self.assertEqual(options['js_runtimes'], {'node': {}})
         self.assertIn('%(id)s', options['outtmpl'])
         video = download_options(self.enqueue(settings={'quality': '720p', 'format': 'mp4'}), self.settings.download_dir)
         self.assertIn('[height<=720]', video['format'])
@@ -176,7 +177,7 @@ class QueueTests(unittest.TestCase):
         app.state.settings = AppSettings(data_dir=self.settings.data_dir, allowed_modes=('audio',), allowed_formats=('mp3',))
         async def run():
             with patch('api.main.validate_target'):
-                start, payload = await call(app, '/api/jobs', 'POST', b'{"url":"https://example.com"}')
+                start, payload = await call(app, '/api/jobs', 'POST', b'{"url":"https://www.youtube.com/watch?v=dQw4w9WgXcQ"}')
                 self.assertEqual(start['status'], 201)
                 self.assertEqual(payload['settings']['mode'], 'audio')
                 self.assertEqual(payload['settings']['format'], 'mp3')
@@ -186,15 +187,15 @@ class QueueTests(unittest.TestCase):
                 self.assertEqual(fetched, payload)
                 start, _ = await call(app, '/api/jobs/missing')
                 self.assertEqual(start['status'], 404)
-                start, _ = await call(app, '/api/jobs', 'POST', b'{"url":"https://example.com","settings":{"mode":"video"}}')
+                start, _ = await call(app, '/api/jobs', 'POST', b'{"url":"https://www.youtube.com/watch?v=dQw4w9WgXcQ","settings":{"mode":"video"}}')
                 self.assertEqual(start['status'], 422)
-                start, _ = await call(app, '/api/jobs', 'POST', b'{"url":"https://example.com","settings":{"filename":"../escape"}}')
+                start, _ = await call(app, '/api/jobs', 'POST', b'{"url":"https://www.youtube.com/watch?v=dQw4w9WgXcQ","settings":{"filename":"../escape"}}')
                 self.assertEqual(start['status'], 422)
                 app.state.settings = self.settings
-                start, _ = await call(app, '/api/jobs', 'POST', b'{"url":"https://example.com","settings":{"format":"mp3"}}')
+                start, _ = await call(app, '/api/jobs', 'POST', b'{"url":"https://www.youtube.com/watch?v=dQw4w9WgXcQ","settings":{"format":"mp3"}}')
                 self.assertEqual(start['status'], 422)
             with patch('api.preview.socket.getaddrinfo', return_value=[(2, 1, 6, '', ('127.0.0.1', 80))]):
-                start, payload = await call(app, '/api/jobs', 'POST', b'{"url":"http://localhost/video"}')
+                start, payload = await call(app, '/api/jobs', 'POST', b'{"url":"https://www.youtube.com/watch?v=dQw4w9WgXcQ"}')
                 self.assertEqual(start['status'], 422)
                 self.assertEqual(payload['error']['code'], 'blocked_target')
         asyncio.run(run())

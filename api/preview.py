@@ -8,16 +8,16 @@ from yt_dlp import YoutubeDL
 from yt_dlp.utils import DownloadError
 
 if __package__:
-    from .contracts import MediaFormat, PreviewItem, PreviewResponse, PreviewRequest
+    from .contracts import MediaFormat, PreviewItem, PreviewResponse, UrlRequest
     from .errors import ApiException
 else:
-    from contracts import MediaFormat, PreviewItem, PreviewResponse, PreviewRequest
+    from contracts import MediaFormat, PreviewItem, PreviewResponse, UrlRequest
     from errors import ApiException
 
 
 def validate_target(url: str) -> str:
     try:
-        url = PreviewRequest(url=url).url
+        url = UrlRequest(url=url).url
         parsed = urlsplit(url)
         addresses = socket.getaddrinfo(parsed.hostname, parsed.port or (443 if parsed.scheme == 'https' else 80), type=socket.SOCK_STREAM)
     except (ValueError, socket.gaierror):
@@ -54,7 +54,7 @@ def public_url(value):
     if not isinstance(value, str):
         return None
     try:
-        return PreviewRequest(url=value).url
+        return UrlRequest(url=value).url
     except ValueError:
         return None
 
@@ -87,13 +87,19 @@ def extract_preview(url: str) -> PreviewResponse:
         'quiet': True, 'no_warnings': True, 'logger': QuietLogger(),
         'skip_download': True, 'cachedir': False, 'socket_timeout': 15,
         'retries': 1, 'extractor_retries': 1, 'proxy': '',
-        'ignore_no_formats_error': True, 'playlistend': 100,
+        'js_runtimes': {'node': {}}, 'playlistend': 100,
     }
     try:
         with PublicYoutubeDL(options) as downloader:
             info = downloader.extract_info(url, download=False)
     except DownloadError as error:
         text = str(error).lower()
+        if "confirm you're not a bot" in text or 'confirm you’re not a bot' in text:
+            raise ApiException(422, 'youtube_verification_required',
+                               'YouTube requires verification from the downloader server. Try again later; if it persists, server-side cookies may be required.') from None
+        if '429' in text or 'too many requests' in text:
+            raise ApiException(422, 'source_rate_limited',
+                               'YouTube is limiting requests from the downloader server. Wait a while before trying again.') from None
         if any(word in text for word in ('private', 'login', 'sign in', 'members-only', 'authentication', '403')):
             raise ApiException(422, 'private_link', 'This link requires access or authentication.') from None
         if 'unsupported url' in text or 'no suitable extractor' in text:

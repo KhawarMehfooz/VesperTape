@@ -10,7 +10,7 @@ Update milestone status and task checkboxes as work is completed.
 | 1. API and configuration | Done |
 | 2. Link preview | Done |
 | 3. Persistent queue and worker | Done |
-| 4. Core download UI | Not started |
+| 4. Core download UI | Done |
 | 5. Download controls and history | Not started |
 | 6. Advanced options | Not started |
 | 7. Security and deployment | Not started |
@@ -52,11 +52,11 @@ Update milestone status and task checkboxes as work is completed.
 
 ## 4. Core download UI
 
-- [ ] Choose the final layout variant from the design study.
-- [ ] Match the selected layout to the design tokens and responsive breakpoints.
-- [ ] Connect URL preview and playlist selection to the API.
-- [ ] Add audio/video mode, quality, format, destination, and optional file name controls.
-- [ ] Connect Add to Downloads to job creation and display API validation errors.
+- [x] Choose the final layout variant from the design study.
+- [x] Match the selected layout to the design tokens and responsive breakpoints.
+- [x] Connect URL preview and playlist selection to the API.
+- [x] Add audio/video mode, quality, format, destination, and optional file name controls.
+- [x] Connect Add to Downloads to job creation and display API validation errors.
 
 ## 5. Download controls and history
 

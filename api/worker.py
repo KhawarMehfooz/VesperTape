@@ -27,6 +27,7 @@ def download_options(job, directory):
     options = {
         'quiet': True, 'no_warnings': True, 'logger': QuietLogger(),
         'cachedir': False, 'proxy': '', 'socket_timeout': 15,
+        'js_runtimes': {'node': {}},
         'retries': 3, 'fragment_retries': 3, 'extractor_retries': 1,
         'continuedl': True, 'overwrites': False, 'ignoreerrors': False,
         'paths': {'home': str(directory)}, 'outtmpl': template,
