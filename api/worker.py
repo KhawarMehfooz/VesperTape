@@ -2,7 +2,9 @@
 import threading
 import time
 import fcntl
+import shutil
 from pathlib import Path
+from uuid import UUID
 
 if __package__:
     from .contracts import ApiError, JobProgress
@@ -57,6 +59,8 @@ class WorkerPool:
         self.stop_event = threading.Event()
         self.threads = []
         self.lock_file = None
+        self.control_lock = threading.Lock()
+        self.active = set()
 
     def start(self):
         # Recovery must never requeue a download owned by another API process.
@@ -67,6 +71,7 @@ class WorkerPool:
             self.lock_file.close()
             raise RuntimeError('Only one API process may own this download queue') from None
         try:
+            self.migrate_outputs()
             self.store.recover()
             for index in range(self.settings.worker_count):
                 thread = threading.Thread(target=self._run, name=f'download-{index}', daemon=True)
@@ -75,6 +80,70 @@ class WorkerPool:
         except Exception:
             self.stop()
             raise
+
+    def publish(self, job, directory):
+        """Reserve filenames exclusively so simultaneous/repeated jobs never overwrite."""
+        names = []
+        sources = [path for path in directory.iterdir() if path.is_file()
+                   and not path.is_symlink() and not path.name.startswith('.')
+                   and not path.name.endswith(('.part', '.ytdl', '.temp'))]
+        if not sources:
+            raise RuntimeError('No completed output')
+        for source in sources:
+            index = 0
+            while True:
+                suffix = '' if index == 0 else f' ({index})'
+                target = self.settings.download_dir / f'{source.stem}{suffix}{source.suffix}'
+                try:
+                    output = target.open('xb')
+                except FileExistsError:
+                    index += 1
+                    continue
+                try:
+                    with output, source.open('rb') as input_file:
+                        shutil.copyfileobj(input_file, output)
+                except Exception:
+                    target.unlink(missing_ok=True)
+                    raise
+                names.append(target.name)
+                break
+        return names
+
+    def migrate_outputs(self):
+        work = self.settings.data_dir / 'work'
+        work.mkdir(exist_ok=True)
+        jobs = self.store.snapshot()[1]
+        for job in jobs:
+            legacy = self.settings.download_dir / job.id
+            directory = work / job.id
+            if legacy.is_dir() and not legacy.is_symlink():
+                if directory.exists():
+                    raise RuntimeError('Both legacy and internal job directories exist')
+                shutil.move(str(legacy), str(directory))
+            if job.status == 'complete' and job.output_directory == 'job' and directory.is_dir():
+                names = self.publish(job, directory)
+                self.store.update(job.id, output_directory='root', output_files=names, output_name=names[-1])
+                shutil.rmtree(directory)
+
+        # Removed history entries can leave legacy folders with valuable files.
+        known = {job.id for job in jobs}
+        for legacy in self.settings.download_dir.iterdir():
+            if not legacy.is_dir() or legacy.is_symlink() or legacy.name in known:
+                continue
+            try:
+                UUID(legacy.name)
+            except ValueError:
+                continue
+            directory = work / legacy.name
+            if directory.exists():
+                raise RuntimeError('Both legacy and internal job directories exist')
+            shutil.move(str(legacy), str(directory))
+            sources = [p for p in directory.iterdir() if p.is_file() and not p.name.startswith('.')
+                       and not p.name.endswith(('.part', '.ytdl', '.temp'))]
+            if sources:
+                self.publish(None, directory)
+                for source in sources:
+                    source.unlink()
 
     def stop(self):
         self.stop_event.set()
@@ -85,18 +154,37 @@ class WorkerPool:
 
     def _run(self):
         while not self.stop_event.is_set():
-            job = self.store.claim()
+            with self.control_lock:
+                job = self.store.claim()
+                if job is not None:
+                    self.active.add(job.id)
             if job is None:
                 self.stop_event.wait(0.25)
                 continue
-            self.process(job)
+            try:
+                self.process(job)
+            finally:
+                with self.control_lock:
+                    self.active.discard(job.id)
+
+    def action(self, job_id, action):
+        with self.control_lock:
+            if action in {'resume', 'retry'} and job_id in self.active:
+                raise ApiException(409, 'worker_stopping', 'Download is stopping. Try again shortly.')
+            return self.store.action(job_id, action)
+
+    def remove(self, job_id):
+        with self.control_lock:
+            if job_id in self.active:
+                raise ApiException(409, 'worker_stopping', 'Download is stopping. Try again shortly.')
+            self.store.remove(job_id)
 
     def process(self, job):
         last_write = 0
-        directory = self.settings.download_dir / job.id
+        directory = self.settings.data_dir / 'work' / job.id
 
         def check_stop():
-            if self.stop_event.is_set():
+            if self.stop_event.is_set() or self.store.get(job.id).status != 'downloading':
                 raise Interrupted()
 
         def progress(data):
@@ -109,7 +197,7 @@ class WorkerPool:
             downloaded = number(data.get('downloaded_bytes'), True) or 0
             total = number(data.get('total_bytes') or data.get('total_bytes_estimate'), True)
             info = data.get('info_dict') or {}
-            self.store.update(job.id, title=str(info.get('title') or job.title or 'Untitled media'),
+            self.store.update(job.id, expected_status='downloading', title=str(info.get('title') or job.title or 'Untitled media'),
                 progress=JobProgress(downloaded_bytes=downloaded, total_bytes=total,
                     percent=min(100, downloaded / total * 100) if total else None,
                     speed_bytes_per_second=number(data.get('speed')), eta_seconds=number(data.get('eta'))))
@@ -119,7 +207,9 @@ class WorkerPool:
             path = Path(filename).resolve()
             if not path.is_relative_to(directory.resolve()):
                 raise RuntimeError('Output escaped job directory')
-            self.store.update(job.id, output_name=path.name)
+            current = self.store.get(job.id)
+            self.store.update(job.id, expected_status='downloading', output_name=path.name,
+                output_files=list(dict.fromkeys([*current.output_files, path.name])))
 
         try:
             check_stop()
@@ -137,14 +227,18 @@ class WorkerPool:
             if not outputs:
                 raise RuntimeError('No completed output')
             current = self.store.get(job.id)
-            self.store.update(job.id, status='complete', title=str((info or {}).get('title') or current.title or 'Untitled media'),
-                output_name=current.output_name or outputs[0].name,
-                progress=current.progress.model_copy(update={'percent': 100, 'speed_bytes_per_second': None, 'eta_seconds': None}), error=None)
+            with self.control_lock:
+                check_stop()
+                names = self.publish(job, directory)
+                self.store.update(job.id, expected_status='downloading', status='complete', title=str((info or {}).get('title') or current.title or 'Untitled media'),
+                    output_name=names[-1], output_files=names, output_directory='root',
+                    progress=current.progress.model_copy(update={'percent': 100, 'speed_bytes_per_second': None, 'eta_seconds': None}), error=None)
+            shutil.rmtree(directory)
         except Exception as error:
             if self.stop_event.is_set() or isinstance(error, Interrupted):
-                self.store.update(job.id, status='queued', progress=JobProgress(), error=None)
+                self.store.update(job.id, expected_status='downloading', status='queued', progress=JobProgress(), error=None)
             else:
                 public_error = error.error if isinstance(error, ApiException) else ApiError(
                     code='download_failed', message='Could not download this media. Check availability and the selected settings.')
-                self.store.update(job.id, status='failed', error=public_error,
+                self.store.update(job.id, expected_status='downloading', status='failed', error=public_error,
                     progress=self.store.get(job.id).progress.model_copy(update={'speed_bytes_per_second': None, 'eta_seconds': None}))

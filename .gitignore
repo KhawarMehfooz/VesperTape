@@ -12,3 +12,6 @@ data/
 .DS_Store
 web/test-results/
 web/playwright-report/
+
+# Default Compose download bind mount
+/downloads/

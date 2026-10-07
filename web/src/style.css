@@ -72,3 +72,6 @@ label.setting-title, label.save-label { display: block; margin-bottom: 8px; }
 @media (max-width: 700px) {
   .link-row .field-label { margin-bottom: 2px; }
 }
+
+.queue-item{grid-template-columns:29px minmax(0,1fr) auto}.job-controls{text-align:right}.queue-actions-inline{flex-wrap:wrap;justify-content:flex-end}.completed-files{display:flex;flex-wrap:wrap;gap:5px;margin-top:7px}.completed-files a{overflow-wrap:anywhere;text-decoration:none}.small-btn:disabled{opacity:.5;cursor:wait}.queue-state.is-paused,.queue-state.is-queued{color:#8b6a2d}.queue-state.is-canceled{color:#727780}
+@media(max-width:550px){.queue-item{grid-template-columns:29px minmax(0,1fr)}.job-controls{grid-column:2;text-align:left}.queue-actions-inline{justify-content:flex-start}.queue-name{white-space:normal;overflow-wrap:anywhere}.queue-meta{overflow-wrap:anywhere}}

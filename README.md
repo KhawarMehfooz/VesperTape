@@ -4,11 +4,39 @@ A self-hosted YouTube video downloader with a React interface and a Python servi
 
 ## Development
 
-Run the Python API in Docker:
+Run the Python API in Docker with automatic local download storage:
 
 ```sh
-docker compose up --build -d
+# macOS / Linux
+python3 scripts/start.py
 ```
+
+```powershell
+# Windows (Python 3)
+py scripts/start.py
+```
+
+The launcher locates your OS Downloads folder and creates a `VesperTape`
+subfolder. Windows uses the system's known Downloads folder (including redirected
+folders); Linux uses the XDG Downloads location when configured; macOS uses
+`~/Downloads`. Completed files are saved directly in that folder. Downloads appear there automatically,
+without clicking a browser Save link. Docker must run on the same computer.
+
+The mapping is saved in the ignored `.env` file, preserving other settings.
+Later `docker compose up --build -d` commands reuse it. To choose another folder,
+run `python3 scripts/start.py --downloads "/path/to/folder"` (use `py` on Windows).
+`--configure-only` writes the mapping without starting Docker. Python 3.9+ and
+Docker Compose are required. Docker Desktop must allow access to the chosen folder.
+
+Without running the launcher, Compose defaults to the project's `downloads/` folder.
+On Linux, use the launcher to configure your UID/GID so downloaded files belong to
+your user. A short-lived root storage initializer prepares volume permissions;
+the API and workers run as the configured non-root user.
+
+On first startup with a new mapped folder, existing files from the old Docker
+volume's `/data/downloads` are copied there without overwriting existing files.
+The old files and job database are preserved. The launcher stops the old worker
+before migration; queued work resumes after startup.
 
 The API is available at `http://localhost:8000`. Set `VESPERTAPE_API_PORT` to change the host port. Compose stores application data in the `vespertape-data` volume.
 
@@ -67,7 +95,9 @@ or unusable storage directories stop startup. Restart the API after changes.
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `VESPERTAPE_DATA_DIR` | `data` locally, `/data` in Docker | Application storage |
-| `VESPERTAPE_DOWNLOAD_DIR` | `<data directory>/downloads` | Download storage |
+| `VESPERTAPE_DOWNLOAD_DIR` | `<data directory>/downloads` locally; `/downloads` in Compose | Download storage inside the API host/container |
+| `VESPERTAPE_HOST_DOWNLOAD_DIR` | `./downloads` before launcher setup | Compose bind-mount source on your computer; launcher selects Downloads/VesperTape |
+| `VESPERTAPE_UID` / `VESPERTAPE_GID` | `10001` | Compose runtime user/group; launcher uses your Linux UID/GID |
 | `VESPERTAPE_WORKER_COUNT` | `1` | Positive integer; concurrent downloads (default: one) |
 | `VESPERTAPE_ALLOWED_MODES` | `["video","audio"]` | JSON array of allowed modes |
 | `VESPERTAPE_ALLOWED_QUALITIES` | `["best","1080p","720p","480p"]` | JSON array of allowed qualities |
@@ -192,9 +222,12 @@ in failure responses.
 Workers claim queued jobs atomically in submission order. The default worker count
 is one; increase `VESPERTAPE_WORKER_COUNT` for parallel jobs. Run one API process
 per data directory (no `uvicorn --workers`); a process lock prevents another API
-instance from resetting active work during startup. Each job writes beneath
-`<download directory>/<job ID>/`, with media IDs and playlist indexes in filenames
-to avoid collisions. Audio conversion and video merging/remuxing require FFmpeg,
+instance from resetting active work during startup. Each job keeps partial files and its archive internally under
+`<data directory>/work/<job ID>/`. Completed files are placed directly in the
+configured download folder. Duplicate filenames receive numbered suffixes,
+such as `video (1).mp4`, without overwriting existing files. On startup, earlier
+job folders are moved into internal storage and completed downloads are placed
+in the main download folder; existing history links are updated. Audio conversion and video merging/remuxing require FFmpeg,
 which is installed in Docker. Local API execution needs FFmpeg and Node 22 or newer on PATH. Previews and workers explicitly enable Node for YouTube’s JavaScript challenges; the pinned `yt-dlp-ejs` dependency supplies the solver scripts. See the [yt-dlp EJS setup guide](https://github.com/yt-dlp/yt-dlp/wiki/EJS).
 
 Progress is saved at most twice per second, plus transfer-finished updates. Speed,
@@ -212,7 +245,7 @@ a crash. Partial files and a per-job yt-dlp archive are retained: compatible par
 transfers resume and completed playlist items are skipped. Recovery requires the
 same persistent download volume; source changes or servers without resume support
 can cause a transfer to restart. Paused, failed, and completed jobs are not
-requeued automatically. Pause/cancel/retry controls follow in milestone 5.
+requeued automatically. Pause/cancel/retry controls are available in the download queue.
 
 `GET /api/jobs/events` streams `event: jobs` messages containing a full
 `JobsResponse`, with a durable revision as the event ID. Every connection receives
@@ -231,3 +264,25 @@ part of milestone 8.
 From `web/`, run `npm run build` and `npm test`. On a new machine, install the test browser with `npx playwright install chromium`. Browser tests use controlled API responses to check playlist submissions, compatible format switching, validation errors, selection guards, and the mobile layout. They do not download live media.
 
 If a preview reports YouTube verification or rate limiting, YouTube is restricting requests from the downloader server’s network. Wait before retrying. A valid URL does not guarantee access from the server; persistent verification may require server-side cookies (planned with the advanced authentication options). Preview extraction reports these errors instead of accepting incomplete metadata with no formats.
+
+### Download controls and history
+
+The queue shows queued, downloading, and paused jobs; recent downloads shows
+completed, canceled, and failed jobs, newest first. Jobs and completed file names
+persist in SQLite and return through the live feed after a reload or restart.
+
+Use Pause/Resume to preserve and continue partial downloads, Cancel to stop a job,
+and Retry to requeue failed or canceled jobs with their original settings.
+Interruption is cooperative: yt-dlp stops at its next progress or processing hook.
+Resume, retry, and removal may briefly ask you to try again while a worker stops.
+Pause/cancel cannot interrupt an FFmpeg operation already in progress immediately.
+
+Remove deletes a terminal job from history and leaves its files on the download
+volume. Save links retrieve completed files, including individual playlist outputs.
+Missing or moved files return 404. File retrieval only serves recorded completed
+outputs under the configured volume and rejects symlinks and path traversal.
+
+API controls: `POST /api/jobs/{id}/actions` with an `action` of `pause`, `resume`,
+`cancel`, or `retry`; `DELETE /api/jobs/{id}` removes a terminal job;
+`GET /api/jobs/{id}/files/{filename}` retrieves a completed output.
+Invalid state transitions return 409 and unknown jobs return 404.

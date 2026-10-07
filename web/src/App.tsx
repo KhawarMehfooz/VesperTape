@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import AdvancedOptions from './AdvancedOptions'
 import Icon from './Icon'
 import { youtubeLinkError } from './api/youtube'
-import type { ErrorResponse, PlaylistSelection, PreviewResponse, JobResponse, JobsResponse, SettingsResponse, DownloadSettings, ApiError } from './api/contracts'
+import type { ErrorResponse, PlaylistSelection, PreviewResponse, JobResponse, JobsResponse, SettingsResponse, DownloadSettings, ApiError, JobActionRequest } from './api/contracts'
 
 export default function App() {
   const [capabilities, setCapabilities] = useState<SettingsResponse | null>(null)
@@ -43,6 +43,9 @@ export default function App() {
     return () => controller.abort()
   }, [settingsAttempt])
   const [jobs, setJobs] = useState<JobResponse[]>([])
+  const [busyJobs, setBusyJobs] = useState<Set<string>>(new Set())
+  const jobLocks = useRef(new Set<string>())
+  const [jobError, setJobError] = useState('')
   const [feedError, setFeedError] = useState(false)
   useEffect(() => {
     const feed = new EventSource('/api/jobs/events')
@@ -148,21 +151,50 @@ export default function App() {
 
   const firstItem = selectedItems[0] ?? preview?.items[0]
   const activeJobs = jobs.filter(job => job.status !== 'complete' && job.status !== 'failed' && job.status !== 'canceled')
-  const recentJobs = jobs.filter(job => job.status === 'complete' || job.status === 'failed' || job.status === 'canceled')
+  const recentJobs = jobs.filter(job => job.status === 'complete' || job.status === 'failed' || job.status === 'canceled').sort((a, b) => b.updated_at.localeCompare(a.updated_at))
   const destinationName = settings?.destination === 'default' ? 'Downloads' : settings?.destination ?? 'Downloads'
   const duration = firstItem?.duration_seconds
   const durationLabel = duration == null ? 'Duration unavailable' : `${Math.floor(duration / 60)}:${String(Math.floor(duration % 60)).padStart(2, '0')}`
 
+  async function controlJob(job: JobResponse, action: JobActionRequest['action'] | 'remove') {
+    if (jobLocks.current.has(job.id)) return
+    jobLocks.current.add(job.id)
+    setBusyJobs(new Set(jobLocks.current))
+    setJobError('')
+    try {
+      const response = await fetch(`/api/jobs/${encodeURIComponent(job.id)}${action === 'remove' ? '' : '/actions'}`, {
+        method: action === 'remove' ? 'DELETE' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        ...(action === 'remove' ? {} : { body: JSON.stringify({ action }) }),
+      })
+      if (!response.ok) {
+        const data: ErrorResponse = await response.json()
+        setJobError(data.error.message)
+        return
+      }
+      // Refresh the authoritative snapshot rather than overwriting a newer SSE state.
+      const snapshot = await fetch('/api/jobs')
+      if (snapshot.ok) setJobs(((await snapshot.json()) as JobsResponse).jobs)
+    } catch {
+      setJobError('Could not confirm the download action. Check its status and try again.')
+    } finally {
+      jobLocks.current.delete(job.id)
+      setBusyJobs(new Set(jobLocks.current))
+    }
+  }
+
   function renderJob(job: JobResponse) {
+    const actions: Array<JobActionRequest['action'] | 'remove'> = job.status === 'queued' || job.status === 'downloading' ? ['pause', 'cancel'] : job.status === 'paused' ? ['resume', 'cancel'] : job.status === 'complete' ? ['remove'] : ['retry', 'remove']
     const stateClass = job.status === 'downloading' ? 'active' : job.status
     return <article className={`queue-item is-${stateClass}`} key={job.id}>
       <div className="file-icon" aria-hidden="true">{job.status === 'failed' ? '!' : job.settings.mode === 'audio' ? '♫' : '▣'}</div>
       <div><div className="queue-name">{job.title ?? 'New download'}</div>
         <div className="queue-meta">{job.settings.format.toUpperCase()} · {job.settings.quality} · {job.output_name ?? 'Output pending'}</div>
-        {job.status === 'downloading' && <><div className="queue-extra"><progress className="progress" max="100" value={job.progress.percent ?? undefined} aria-label="Download progress" /><span className="queue-meta">{job.progress.percent == null ? 'Size unknown' : `${job.progress.percent.toFixed(1)}%`}</span></div><div className="queue-meta">{job.progress.speed_bytes_per_second !== null && `${(job.progress.speed_bytes_per_second / 1048576).toFixed(2)} MB/s`}{job.progress.eta_seconds !== null && ` · ${Math.ceil(job.progress.eta_seconds)}s remaining`}</div></>}
+        {(job.status === 'downloading' || job.status === 'paused') && <><div className="queue-extra"><progress className="progress" max="100" value={job.progress.percent ?? undefined} aria-label="Download progress" /><span className="queue-meta">{job.progress.percent == null ? 'Size unknown' : `${job.progress.percent.toFixed(1)}%`}</span></div><div className="queue-meta">{job.progress.speed_bytes_per_second !== null && `${(job.progress.speed_bytes_per_second / 1048576).toFixed(2)} MB/s`}{job.progress.eta_seconds !== null && ` · ${Math.ceil(job.progress.eta_seconds)}s remaining`}</div></>}
+        {job.status === 'complete' && <div className="completed-files">{(job.output_files ?? (job.output_name ? [job.output_name] : [])).map(filename => <a className="small-btn" key={filename} href={`/api/jobs/${encodeURIComponent(job.id)}/files/${encodeURIComponent(filename)}`} download={filename}>Save {filename}</a>)}</div>}
         {job.error && <div className="queue-meta error">{job.error.message}</div>}
       </div>
-      <div className={`queue-state is-${stateClass}`}>{job.status.toUpperCase()}</div>
+      <div className="job-controls"><div className={`queue-state is-${stateClass}`}>{job.status.toUpperCase()}</div><div className="queue-actions-inline">{actions.map(action => <button className="small-btn" key={action} disabled={busyJobs.has(job.id)} onClick={() => void controlJob(job, action)}>{action[0].toUpperCase() + action.slice(1)}</button>)}</div></div>
     </article>
   }
 
@@ -238,11 +270,12 @@ export default function App() {
           </form>}
         </div>
         <section aria-label="Download queue"><div className="queue-head"><h2><Icon name="queue" />Your downloads</h2><span>{activeJobs.length} in progress</span></div>
+          {jobError && <div className="preview-message error" role="alert">{jobError}</div>}
           {feedError && <div className="queue-note" role="status">Live updates disconnected. Reconnecting…</div>}
           <div className="download-list" aria-live="polite">{activeJobs.map(renderJob)}</div>
           {!activeJobs.length && <div className="empty-queue">No downloads queued yet.</div>}
         </section>
-        <section className="history-panel" aria-label="Recent downloads"><div className="queue-head"><h2 className="history-title">Recently saved</h2><span>{recentJobs.length} items</span></div>{recentJobs.map(renderJob)}{!recentJobs.length && <div className="empty-queue">Your saved downloads will appear here.</div>}</section>
+        <section className="history-panel" aria-label="Recent downloads"><div className="queue-head"><h2 className="history-title">Recent downloads</h2><span>{recentJobs.length} items</span></div>{recentJobs.map(renderJob)}{!recentJobs.length && <div className="empty-queue">Your saved downloads will appear here.</div>}</section>
       </div></section>
       <dialog className="location-dialog" ref={locationDialog} aria-labelledby="location-title"><form method="dialog"><div className="dialog-heading"><span className="dialog-folder">✦</span><div><h2 id="location-title">Choose a cozy spot</h2><p>Docker maps these folder names to locations you choose during setup. Works on Windows, macOS, and Linux.</p></div></div>{capabilities?.destinations.map(value => <label className="folder-choice" key={value}><input type="radio" name="folder-choice" value={value} checked={destinationDraft === value} onChange={() => setDestinationDraft(value)} /><span className="folder-symbol">▱</span><span><b>{value === 'default' ? 'Downloads' : value}</b><small>{value === 'default' ? 'Default save folder' : 'Configured save folder'}</small></span></label>)}<div className="dialog-actions"><button className="bevel-btn" value="cancel">Keep current</button><button className="bevel-btn primary" value="choose" onClick={() => updateSettings({ destination: destinationDraft })}>Use this folder</button></div></form></dialog>
       <div className={`demo-toast${toast ? ' show' : ''}`} role="status" aria-live="polite">{toast}</div>

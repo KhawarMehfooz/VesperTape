@@ -3,11 +3,11 @@ from pathlib import Path
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 if __package__:
-    from .contracts import ErrorResponse, HealthResponse, SettingsResponse, PreviewRequest, PreviewResponse, CreateJobRequest, JobResponse, JobsResponse
+    from .contracts import ErrorResponse, HealthResponse, SettingsResponse, PreviewRequest, PreviewResponse, CreateJobRequest, JobResponse, JobsResponse, JobActionRequest
     from .settings import AppSettings
     from .database import Database
     from .preview import extract_preview, validate_target
@@ -15,7 +15,7 @@ if __package__:
     from .jobs import JobStore
     from .worker import WorkerPool
 else:
-    from contracts import ErrorResponse, HealthResponse, SettingsResponse, PreviewRequest, PreviewResponse, CreateJobRequest, JobResponse, JobsResponse
+    from contracts import ErrorResponse, HealthResponse, SettingsResponse, PreviewRequest, PreviewResponse, CreateJobRequest, JobResponse, JobsResponse, JobActionRequest
     from settings import AppSettings
     from database import Database
     from preview import extract_preview, validate_target
@@ -103,6 +103,35 @@ async def job_events(request: Request):
 @app.get("/api/jobs/{job_id}", response_model=JobResponse)
 def get_job(job_id: str) -> JobResponse:
     return app.state.jobs.get(job_id)
+
+
+@app.post("/api/jobs/{job_id}/actions", response_model=JobResponse)
+def job_action(job_id: str, request: JobActionRequest) -> JobResponse:
+    return app.state.workers.action(job_id, request.action)
+
+
+@app.delete("/api/jobs/{job_id}", status_code=204)
+def remove_job(job_id: str):
+    app.state.workers.remove(job_id)
+    return Response(status_code=204)
+
+
+@app.get("/api/jobs/{job_id}/files/{filename}", response_class=FileResponse)
+def completed_file(job_id: str, filename: str):
+    job = app.state.jobs.get(job_id)
+    if job.status != 'complete':
+        raise ApiException(409, 'invalid_job_state', 'Files are available after the download completes')
+    names = job.output_files or ([job.output_name] if job.output_name else [])
+    root = app.state.settings.download_dir.resolve()
+    directory = root if job.output_directory == 'root' else root / job.id
+    path = directory / filename
+    if (filename not in names or Path(filename).name != filename
+            or directory.is_symlink() or path.is_symlink()
+            or not path.resolve().is_relative_to(root)
+            or not path.resolve().is_relative_to(directory.resolve()) or not path.is_file()):
+        raise ApiException(404, 'not_found', 'Completed file not found')
+    return FileResponse(path, filename=filename, media_type='application/octet-stream',
+                        headers={'X-Content-Type-Options': 'nosniff'})
 
 
 @app.get("/api/health", response_model=HealthResponse)

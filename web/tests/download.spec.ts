@@ -129,3 +129,28 @@ test('switches quality controls to audio and restores the chosen video resolutio
   await expect(page.getByLabel('Resolution', { exact: true })).toHaveValue('720p')
   await expect(page.getByLabel('Audio quality', { exact: true })).toHaveCount(0)
 })
+
+test('pauses and resumes downloads and exposes completed files', async ({ page }) => {
+  let job = { id: 'active', title: 'Active video', status: 'downloading', settings: defaults, progress: { percent: 42, speed_bytes_per_second: 1048576, eta_seconds: 9 }, output_name: null, error: null }
+  const saved = { ...job, id: 'saved', title: 'Saved playlist', status: 'complete', output_files: ['one.mp4', 'two.mp4'] }
+  await page.route('**/api/jobs/events', route => route.fulfill({ contentType: 'text/event-stream', body: `event: jobs\ndata: ${JSON.stringify({ jobs: [job, saved] })}\n\n` }))
+  await page.route('**/api/jobs', route => route.fulfill({ json: { jobs: [job, saved] } }))
+  await page.route('**/api/jobs/active/actions', async route => {
+    const { action } = route.request().postDataJSON()
+    job = { ...job, status: action === 'pause' ? 'paused' : 'queued' }
+    await route.fulfill({ json: job })
+  })
+  await page.goto('/')
+  const active = page.locator('article').filter({ hasText: 'Active video' })
+  await expect(active).toContainText('42.0%')
+  await expect(active).toContainText('1.00 MB/s')
+  await active.getByRole('button', { name: 'Pause', exact: true }).click()
+  await expect(active).toContainText('PAUSED')
+  await active.getByRole('button', { name: 'Resume', exact: true }).click()
+  await expect(active).toContainText('QUEUED')
+  const history = page.locator('article').filter({ hasText: 'Saved playlist' })
+  await expect(history.getByRole('link')).toHaveCount(2)
+  await expect(history.getByRole('link', { name: 'Save one.mp4' })).toHaveAttribute('href', '/api/jobs/saved/files/one.mp4')
+  await page.setViewportSize({ width: 375, height: 812 })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+})

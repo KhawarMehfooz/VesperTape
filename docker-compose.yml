@@ -1,14 +1,54 @@
 services:
+  storage-init:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        if [ ! -f /downloads/.vespertape-migrated ]; then
+          if [ -d /data/downloads ]; then
+            python -c '
+        import shutil
+        from pathlib import Path
+        def preserve_existing(source, target):
+            if not Path(target).exists():
+                return shutil.copy2(source, target)
+            return target
+        shutil.copytree("/data/downloads", "/downloads", dirs_exist_ok=True, copy_function=preserve_existing)
+        '
+          fi
+          touch /downloads/.vespertape-migrated
+        fi
+        chown -R "$${OWNER_UID}:$${OWNER_GID}" /data /downloads
+    environment:
+      OWNER_UID: ${VESPERTAPE_UID:-10001}
+      OWNER_GID: ${VESPERTAPE_GID:-10001}
+    volumes:
+      - vespertape-data:/data
+      - type: bind
+        source: ${VESPERTAPE_HOST_DOWNLOAD_DIR:-./downloads}
+        target: /downloads
+
   vespertape:
     build:
       context: ./api
       dockerfile: Dockerfile
+    depends_on:
+      storage-init:
+        condition: service_completed_successfully
+    user: "${VESPERTAPE_UID:-10001}:${VESPERTAPE_GID:-10001}"
     ports:
       - "${VESPERTAPE_API_PORT:-8000}:8000"
     environment:
       VESPERTAPE_DATA_DIR: /data
+      VESPERTAPE_DOWNLOAD_DIR: /downloads
     volumes:
       - vespertape-data:/data
+      - type: bind
+        source: ${VESPERTAPE_HOST_DOWNLOAD_DIR:-./downloads}
+        target: /downloads
     restart: unless-stopped
 
 volumes:

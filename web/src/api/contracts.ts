@@ -55,6 +55,8 @@ export interface JobResponse {
   settings: DownloadSettings;
   progress: JobProgress;
   output_name: string | null;
+  output_files: Array<string>;
+  output_directory: "job" | "root";
   error: ApiError | null;
   created_at: string;
   updated_at: string;

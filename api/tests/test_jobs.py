@@ -106,8 +106,8 @@ class QueueTests(unittest.TestCase):
 
     def test_empty_download_is_failed_and_partial_files_survive_recovery(self):
         job = self.enqueue()
-        directory = self.settings.download_dir / job.id
-        directory.mkdir()
+        directory = self.settings.data_dir / 'work' / job.id
+        directory.mkdir(parents=True)
         partial = directory / 'media.mp4.part'
         partial.write_bytes(b'partial data')
         class EmptyDownloader:
@@ -221,3 +221,123 @@ class QueueTests(unittest.TestCase):
             self.assertIn(job.id, await anext(reconnected))
             await reconnected.aclose()
         asyncio.run(run())
+
+    def test_controls_persist_and_removal_advances_feed(self):
+        from api.errors import ApiException
+        job = self.enqueue()
+        self.assertEqual(self.store.action(job.id, 'pause').status, 'paused')
+        self.store.recover()
+        self.assertEqual(self.store.get(job.id).status, 'paused')
+        self.assertEqual(self.store.action(job.id, 'resume').status, 'queued')
+        self.assertEqual(self.store.action(job.id, 'cancel').status, 'canceled')
+        self.assertEqual(self.store.action(job.id, 'retry').status, 'queued')
+        with self.assertRaises(ApiException):
+            self.store.action(job.id, 'resume')
+        with self.assertRaises(ApiException):
+            self.store.remove(job.id)
+        self.store.action(job.id, 'cancel')
+        revision = self.store.snapshot()[0]
+        self.store.remove(job.id)
+        self.assertGreater(self.store.snapshot()[0], revision)
+        self.assertEqual(self.store.snapshot()[1], [])
+
+    def test_worker_cannot_overwrite_pause_or_cancel(self):
+        from api.errors import ApiException
+        for action, status in [('pause', 'paused'), ('cancel', 'canceled')]:
+            job = self.enqueue()
+            pool = WorkerPool(self.store, self.settings)
+            pool.active.add(job.id)
+            class ControlledDownloader:
+                def __init__(self, options):
+                    self.options = options
+                def __enter__(self):
+                    return self
+                def __exit__(self, *args):
+                    pass
+                def extract_info(self, *args, **kwargs):
+                    pool.action(job.id, action)
+                    with self_outer.assertRaises(ApiException):
+                        pool.action(job.id, 'resume' if action == 'pause' else 'retry')
+                    self.options['progress_hooks'][0]({'status': 'finished'})
+            self_outer = self
+            pool.downloader_factory = ControlledDownloader
+            with patch('api.worker.validate_target'):
+                pool.process(self.store.claim())
+            self.assertEqual(self.store.get(job.id).status, status)
+            self.store.update(job.id, expected_status='downloading', status='complete')
+            self.assertEqual(self.store.get(job.id).status, status)
+            pool.active.clear()
+            if action == 'pause':
+                pool.action(job.id, 'cancel')
+
+    def test_action_http_and_safe_file_retrieval(self):
+        from api.main import app, completed_file
+        from api.errors import ApiException
+        app.state.jobs = self.store
+        app.state.settings = self.settings
+        app.state.workers = WorkerPool(self.store, self.settings)
+        job = self.enqueue()
+        async def run():
+            start, payload = await call(app, f'/api/jobs/{job.id}/actions', 'POST', b'{"action":"pause"}')
+            self.assertEqual(start['status'], 200)
+            self.assertEqual(payload['status'], 'paused')
+            start, _ = await call(app, f'/api/jobs/{job.id}/actions', 'POST', b'{"action":"pause"}')
+            self.assertEqual(start['status'], 409)
+            start, _ = await call(app, '/api/jobs/missing/actions', 'POST', b'{"action":"cancel"}')
+            self.assertEqual(start['status'], 404)
+        asyncio.run(run())
+        with self.assertRaises(ApiException):
+            completed_file(job.id, 'media.mp4')
+        directory = self.settings.download_dir / job.id
+        directory.mkdir()
+        (directory / 'media.mp4').write_bytes(b'media')
+        self.store.update(job.id, status='complete', output_name='media.mp4', output_files=['media.mp4', 'link.mp4', '../secret'])
+        response = completed_file(job.id, 'media.mp4')
+        self.assertEqual(response.path, directory / 'media.mp4')
+        self.assertIn('attachment;', response.headers['content-disposition'])
+        (directory / 'link.mp4').symlink_to(self.database.path)
+        for name in ['link.mp4', '../secret', '.archive', 'missing.mp4']:
+            with self.assertRaises(ApiException):
+                completed_file(job.id, name)
+        self.store.remove(job.id)
+        self.assertTrue((directory / 'media.mp4').exists())
+        with self.assertRaises(ApiException):
+            completed_file(job.id, 'media.mp4')
+
+    def test_flat_outputs_migration_collision_and_internal_partials(self):
+        from api.main import app, completed_file
+        pool = WorkerPool(self.store, self.settings)
+        first, second, paused = self.enqueue(), self.enqueue(), self.enqueue()
+        for job in [first, second]:
+            directory = self.settings.download_dir / job.id
+            directory.mkdir()
+            (directory / 'media.mp4').write_bytes(job.id.encode())
+            (directory / '.archive').write_text('archive')
+            self.store.update(job.id, status='complete', output_name='media.mp4')
+        partial_directory = self.settings.download_dir / paused.id
+        partial_directory.mkdir()
+        (partial_directory / 'unfinished.mp4.part').write_bytes(b'partial')
+        self.store.action(paused.id, 'pause')
+        pool.migrate_outputs()
+        self.assertEqual((self.settings.download_dir / 'media.mp4').read_bytes(), first.id.encode())
+        self.assertEqual((self.settings.download_dir / 'media (1).mp4').read_bytes(), second.id.encode())
+        self.assertFalse(any(path.is_dir() for path in self.settings.download_dir.iterdir()))
+        self.assertTrue((self.settings.data_dir / 'work' / paused.id / 'unfinished.mp4.part').exists())
+        self.assertEqual(self.store.get(paused.id).status, 'paused')
+        app.state.jobs = self.store
+        app.state.settings = self.settings
+        self.assertEqual(completed_file(second.id, 'media (1).mp4').path, self.settings.download_dir / 'media (1).mp4')
+        pool.migrate_outputs()
+        self.assertEqual(len(list(self.settings.download_dir.iterdir())), 2)
+
+    def test_legacy_folder_without_history_preserves_media(self):
+        job = self.enqueue()
+        directory = self.settings.download_dir / job.id
+        directory.mkdir()
+        (directory / 'old.mp4').write_bytes(b'old media')
+        self.store.action(job.id, 'cancel')
+        self.store.remove(job.id)
+        pool = WorkerPool(self.store, self.settings)
+        pool.migrate_outputs()
+        self.assertEqual((self.settings.download_dir / 'old.mp4').read_bytes(), b'old media')
+        self.assertFalse(directory.exists())

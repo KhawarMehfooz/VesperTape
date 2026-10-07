@@ -11,7 +11,7 @@ Update milestone status and task checkboxes as work is completed.
 | 2. Link preview | Done |
 | 3. Persistent queue and worker | Done |
 | 4. Core download UI | Done |
-| 5. Download controls and history | Not started |
+| 5. Download controls and history | Done |
 | 6. Advanced options | Not started |
 | 7. Security and deployment | Not started |
 | 8. Final checks and documentation | Not started |
@@ -60,11 +60,11 @@ Update milestone status and task checkboxes as work is completed.
 
 ## 5. Download controls and history
 
-- [ ] Show queued, downloading, paused, complete, canceled, and failed jobs.
-- [ ] Add pause/resume, cancel, retry, and remove actions.
-- [ ] Show progress, transfer speed, and estimated time when yt-dlp provides them.
-- [ ] Persist and display recent completed downloads.
-- [ ] Add a safe endpoint to retrieve completed files from the configured download volume.
+- [x] Show queued, downloading, paused, complete, canceled, and failed jobs.
+- [x] Add pause/resume, cancel, retry, and remove actions.
+- [x] Show progress, transfer speed, and estimated time when yt-dlp provides them.
+- [x] Persist and display recent completed downloads.
+- [x] Add a safe endpoint to retrieve completed files from the configured download volume.
 
 ## 6. Advanced options
 

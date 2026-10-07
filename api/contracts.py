@@ -178,6 +178,8 @@ class JobResponse(Contract):
     settings: DownloadSettings
     progress: JobProgress
     output_name: str | None = None
+    output_files: list[str] = Field(default_factory=list)
+    output_directory: Literal["job", "root"] = "job"
     error: ApiError | None = None
     created_at: str
     updated_at: str
