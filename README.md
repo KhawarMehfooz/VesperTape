@@ -5,11 +5,7 @@ yt-dlp and FFmpeg, with a desktop-inspired web interface.
 
 ## Screenshot
 
-Screenshot to be added.
-
-<!-- Replace the placeholder above with the supplied screenshot:
-![VesperTape interface](docs/images/vespertape.png)
--->
+![VesperTape interface](docs/images/preview.jpg)
 
 ## Features
 

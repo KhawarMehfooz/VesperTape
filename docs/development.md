@@ -39,6 +39,26 @@ After changing API code used by Docker, run `docker compose up --build -d`;
 the container does not mount the source code.
 
 
+## Frontend structure
+
+`web/src/App.tsx` composes the app window, download form, and job lists.
+
+| Location | Responsibility |
+| --- | --- |
+| `src/api/client.ts` | HTTP requests, public API errors, and the jobs event feed |
+| `src/api/contracts.ts` | Generated API types; regenerate instead of editing |
+| `src/hooks/` | Preview cancellation and selection, settings, submissions, job state, and transient messages |
+| `src/components/preview/` | Link input, preview card, and playlist controls |
+| `src/components/settings/` | Output settings, save settings, folder picker, and advanced options |
+| `src/components/downloads/` | Active jobs, history, downloaded items, and job actions |
+| `src/components/forms/` | Shared typed input fields and submission errors |
+| `src/utils/` | Format compatibility, labels, thumbnail lookup, and playlist ordering |
+| `src/styles/theme.css` | App styles and responsive rules |
+
+Use `npm run format` from `web/` to format frontend source and configuration.
+`npm run format:check` checks formatting without changing files. Generated API
+contracts are excluded so the Python generator remains their sole owner.
+
 ## Frontend checks
 
 From `web/`, run `npm run build` and `npm test`. On a new machine, install the test browser with `npx playwright install chromium`. Browser tests use controlled API responses to check playlist submissions, compatible format switching, validation errors, selection guards, and the mobile layout. They do not download live media.

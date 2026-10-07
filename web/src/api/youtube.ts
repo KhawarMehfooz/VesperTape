@@ -8,11 +8,24 @@ const embedHosts = ['youtube-nocookie.com', 'www.youtube-nocookie.com']
 export function youtubeLinkError(value: string): string | null {
   const link = value.trim()
   let url: URL
-  try { url = new URL(link) } catch { return 'Provide a valid YouTube HTTP or HTTPS link.' }
-  if (!/^https?:\/\//i.test(link) || !['http:', 'https:'].includes(url.protocol) || url.username || url.password || /^[^/]+:\/\/[^/]*@/.test(link) || url.port || /[\s\\\x00-\x1f]/.test(link)) {
+  try {
+    url = new URL(link)
+  } catch {
     return 'Provide a valid YouTube HTTP or HTTPS link.'
   }
-  if (![...youtubeHosts, ...shortHosts, ...embedHosts].includes(url.hostname)) return 'Only YouTube links are supported.'
+  if (
+    !/^https?:\/\//i.test(link) ||
+    !['http:', 'https:'].includes(url.protocol) ||
+    url.username ||
+    url.password ||
+    /^[^/]+:\/\/[^/]*@/.test(link) ||
+    url.port ||
+    /[\s\\\x00-\x1f]/.test(link)
+  ) {
+    return 'Provide a valid YouTube HTTP or HTTPS link.'
+  }
+  if (![...youtubeHosts, ...shortHosts, ...embedHosts].includes(url.hostname))
+    return 'Only YouTube links are supported.'
   const path = url.pathname.replace(/\/+$/, '')
   const singleId = (name: string, pattern: RegExp) => {
     const values = url.searchParams.getAll(name)
@@ -25,6 +38,7 @@ export function youtubeLinkError(value: string): string | null {
   else if (path === '/playlist') valid = singleId('list', playlistId)
   else valid = /^\/(shorts|live|embed)\/[A-Za-z0-9_-]{11}$/.test(path)
   if (!valid) return 'Provide a valid YouTube video or playlist link.'
-  if (url.searchParams.has('list') && !singleId('list', playlistId)) return 'Provide a valid YouTube playlist ID.'
+  if (url.searchParams.has('list') && !singleId('list', playlistId))
+    return 'Provide a valid YouTube playlist ID.'
   return null
 }
