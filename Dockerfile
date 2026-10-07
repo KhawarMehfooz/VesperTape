@@ -1,7 +1,7 @@
 FROM node:lts-alpine AS web-build
 WORKDIR /web
-COPY web/package.json ./
-RUN npm install
+COPY web/package.json web/package-lock.json ./
+RUN npm ci
 COPY web/ ./
 RUN npm run build
 
@@ -14,8 +14,8 @@ RUN apk add --no-cache ffmpeg nodejs \
     && mkdir -p /data \
     && chown app:app /data
 
-COPY api/requirements.txt ./api/requirements.txt
-RUN pip install --no-cache-dir -r api/requirements.txt
+COPY api/requirements.lock ./api/requirements.lock
+RUN pip install --no-cache-dir -r api/requirements.lock
 
 COPY api/ ./api/
 COPY --from=web-build /web/dist ./web/dist

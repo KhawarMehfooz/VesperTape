@@ -1,8 +1,10 @@
 services:
   vespertape:
-    build: .
+    build:
+      context: ./api
+      dockerfile: Dockerfile
     ports:
-      - "${VESPERTAPE_PORT:-8080}:8000"
+      - "${VESPERTAPE_API_PORT:-8000}:8000"
     environment:
       VESPERTAPE_DATA_DIR: /data
     volumes:

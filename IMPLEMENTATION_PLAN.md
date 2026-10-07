@@ -6,7 +6,7 @@ Update milestone status and task checkboxes as work is completed.
 
 | Milestone | Status |
 | --- | --- |
-| 0. Project scaffold | In progress |
+| 0. Project scaffold | Done |
 | 1. API and configuration | Not started |
 | 2. Link preview | Not started |
 | 3. Persistent queue and worker | Not started |
@@ -23,8 +23,8 @@ Update milestone status and task checkboxes as work is completed.
 - [x] Add one Dockerfile and one Compose service.
 - [x] Add starter screen based on the design study.
 - [x] Ignore `vespertape-ui-design-system.html` in Git.
-- [ ] Pin frontend and Python dependencies with lock files.
-- [x] Build and launch the container; confirm the UI and health endpoint work.
+- [x] Pin frontend and Python dependencies with lock files.
+- [x] Build and launch the container; confirm the API health endpoint works.
 
 ## 1. API and configuration
 
