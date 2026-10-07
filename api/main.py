@@ -7,6 +7,7 @@ from fastapi.responses import FileResponse, StreamingResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 if __package__:
+    from .security import AccessProtection
     from .contracts import ErrorResponse, HealthResponse, SettingsResponse, PreviewRequest, PreviewResponse, CreateJobRequest, JobResponse, JobsResponse, JobActionRequest
     from .settings import AppSettings
     from .database import Database
@@ -15,6 +16,7 @@ if __package__:
     from .jobs import JobStore
     from .worker import WorkerPool
 else:
+    from security import AccessProtection
     from contracts import ErrorResponse, HealthResponse, SettingsResponse, PreviewRequest, PreviewResponse, CreateJobRequest, JobResponse, JobsResponse, JobActionRequest
     from settings import AppSettings
     from database import Database
@@ -45,6 +47,7 @@ app = FastAPI(
     responses={code: {"model": ErrorResponse} for code in (404, 405, 422, 500)},
 )
 install_error_handlers(app)
+app.add_middleware(AccessProtection)
 
 
 @app.get("/api/settings", response_model=SettingsResponse)

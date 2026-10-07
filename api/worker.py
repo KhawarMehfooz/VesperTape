@@ -126,8 +126,17 @@ class WorkerPool:
             self.stop()
             raise
 
+    def check_work_directory(self, directory):
+        root = self.settings.data_dir
+        work = root / 'work'
+        if (work.is_symlink() or directory.is_symlink()
+                or not directory.resolve().is_relative_to(root.resolve())
+                or directory.parent != work):
+            raise RuntimeError('Unsafe job storage directory')
+
     def publish(self, job, directory):
         """Reserve filenames exclusively so simultaneous/repeated jobs never overwrite."""
+        self.check_work_directory(directory)
         names = []
         sources = [path for path in directory.iterdir() if path.is_file()
                    and not path.is_symlink() and not path.name.startswith('.')
@@ -162,11 +171,14 @@ class WorkerPool:
 
     def migrate_outputs(self):
         work = self.settings.data_dir / 'work'
+        if work.is_symlink():
+            raise RuntimeError('Unsafe job storage directory')
         work.mkdir(exist_ok=True)
         jobs = self.store.snapshot()[1]
         for job in jobs:
             legacy = self.settings.download_dir / job.id
             directory = work / job.id
+            self.check_work_directory(directory)
             if legacy.is_dir() and not legacy.is_symlink():
                 if directory.exists():
                     raise RuntimeError('Both legacy and internal job directories exist')
@@ -186,6 +198,7 @@ class WorkerPool:
             except ValueError:
                 continue
             directory = work / legacy.name
+            self.check_work_directory(directory)
             if directory.exists():
                 raise RuntimeError('Both legacy and internal job directories exist')
             shutil.move(str(legacy), str(directory))
@@ -264,6 +277,7 @@ class WorkerPool:
 
         try:
             check_stop()
+            self.check_work_directory(directory)
             directory.mkdir(parents=True, exist_ok=True)
             validate_target(job.source_url)
             if job.settings.proxy:

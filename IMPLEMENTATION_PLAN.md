@@ -13,7 +13,7 @@ Update milestone status and task checkboxes as work is completed.
 | 4. Core download UI | Done |
 | 5. Download controls and history | Done |
 | 6. Advanced options | Done |
-| 7. Security and deployment | Not started |
+| 7. Security and deployment | Done |
 | 8. Final checks and documentation | Not started |
 
 ## 0. Project scaffold
@@ -77,12 +77,18 @@ Update milestone status and task checkboxes as work is completed.
 
 ## 7. Security and deployment
 
-- [ ] Keep downloads and application data in persistent Docker volumes.
-- [ ] Restrict output paths to configured directories and prevent path traversal.
-- [ ] Avoid logging cookie data, credentials, or sensitive request headers.
-- [ ] Add optional single-user access protection before exposing the service beyond a trusted network.
-- [ ] Add health checks, graceful shutdown, and recovery for active jobs.
-- [ ] Confirm the container runs as a non-root user and document volume permissions.
+- [x] Keep downloads and application data in persistent Docker volumes.
+- [x] Restrict output paths to configured directories and prevent path traversal.
+- [x] Avoid logging cookie data, credentials, or sensitive request headers.
+- [x] Add optional single-user access protection before exposing the service beyond a trusted network.
+- [x] Add health checks, graceful shutdown, and recovery for active jobs.
+- [x] Confirm the container runs as a non-root user and document volume permissions.
+
+Verified with 60 API tests, 15 frontend browser tests, the frontend production
+build, and an isolated Compose deployment. Docker checks covered health, bundled
+UI authentication, cross-origin mutation rejection, UID 10001, and persistent
+application/download files after restart. Cooperative interruption and active-job
+recovery are covered by worker tests; live media recovery remains in milestone 8.
 
 ## 8. Final checks and documentation
 

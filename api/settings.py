@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import get_args
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 
 if __package__:
     from .contracts import (
@@ -21,11 +21,12 @@ else:
 
 
 class AppSettings(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True, validate_default=True)
+    model_config = ConfigDict(extra="forbid", frozen=True, validate_default=True, hide_input_in_errors=True)
 
     data_dir: Path = Path("data")
     download_dir: Path | None = None
     cookie_file: Path | None = None
+    access_password: SecretStr | None = None
     worker_count: int = Field(default=1, ge=1, strict=True)
     allowed_modes: tuple[DownloadMode, ...] = get_args(DownloadMode)
     allowed_qualities: tuple[DownloadQuality, ...] = get_args(DownloadQuality)
@@ -51,6 +52,16 @@ class AppSettings(BaseModel):
         if path.stat().st_mode & 0o007 or not os.access(path, os.R_OK):
             raise ValueError("Cookie file must be readable and inaccessible to other users")
         return path.resolve()
+
+    @field_validator("access_password", mode="before")
+    @classmethod
+    def validate_password(cls, value):
+        if value is None or value == "":
+            return None
+        secret = value.get_secret_value() if isinstance(value, SecretStr) else value
+        if len(secret) < 16 or any(ord(char) < 32 for char in secret):
+            raise ValueError("Access password must contain at least 16 characters and no control characters")
+        return value
 
     @field_validator("allowed_modes", "allowed_qualities", "allowed_formats")
     @classmethod
