@@ -8,7 +8,7 @@ Update milestone status and task checkboxes as work is completed.
 | --- | --- |
 | 0. Project scaffold | Done |
 | 1. API and configuration | Done |
-| 2. Link preview | Not started |
+| 2. Link preview | Done |
 | 3. Persistent queue and worker | Not started |
 | 4. Core download UI | Not started |
 | 5. Download controls and history | Not started |
@@ -35,11 +35,11 @@ Update milestone status and task checkboxes as work is completed.
 
 ## 2. Link preview
 
-- [ ] Add `POST /api/preview` using yt-dlp metadata extraction without downloading media.
-- [ ] Return title, uploader, thumbnail, duration, formats, and playlist information.
-- [ ] Support choosing one item, the full playlist, or a playlist range.
-- [ ] Show loading, unsupported link, private link, and no-format states in the UI.
-- [ ] Validate URL scheme and reject local or private network targets where possible.
+- [x] Add `POST /api/preview` using yt-dlp metadata extraction without downloading media.
+- [x] Return title, uploader, thumbnail, duration, formats, and playlist information.
+- [x] Support choosing one item, the full playlist, or a playlist range.
+- [x] Show loading, unsupported link, private link, and no-format states in the UI.
+- [x] Validate URL scheme and reject local or private network targets where possible.
 
 ## 3. Persistent queue and worker
 

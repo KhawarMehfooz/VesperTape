@@ -52,3 +52,19 @@ button, input { font: inherit; }
   .link-row label { grid-column: 1 / -1; }
   .link-row input { width: 100%; }
 }
+
+.preview-message { padding: 12px; font-size: 13px; }
+.error { color: #972a23; }
+.selection { display: flex; flex-wrap: wrap; gap: 12px; margin: 12px 0; border: 1px solid #a7aaae; border-radius: 4px; }
+.selection label { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.selection input { width: 65px; }
+.selection input, .selection select { padding: 6px; border: 1px solid #7f858c; border-radius: 3px; background: #fff; }
+.preview-items { display: grid; gap: 12px; }
+.media-item { display: flex; align-items: flex-start; gap: 12px; padding: 12px 0; border-top: 1px solid #adb1b5; overflow-wrap: anywhere; }
+.media-item img { width: 120px; max-width: 28%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 3px; }
+.media-item > div { min-width: 0; }
+.media-item h3 { margin: 0 0 6px; font-size: 15px; }
+.media-item details { font-size: 12px; }
+.media-item summary { cursor: pointer; }
+button { cursor: pointer; }
+:focus-visible { outline: 2px solid #a32923; outline-offset: 3px; }

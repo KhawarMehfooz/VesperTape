@@ -6,14 +6,16 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 if __package__:
-    from .contracts import ErrorResponse, HealthResponse, SettingsResponse
+    from .contracts import ErrorResponse, HealthResponse, SettingsResponse, PreviewRequest, PreviewResponse
     from .settings import AppSettings
     from .database import Database
+    from .preview import extract_preview
     from .errors import install_error_handlers
 else:
-    from contracts import ErrorResponse, HealthResponse, SettingsResponse
+    from contracts import ErrorResponse, HealthResponse, SettingsResponse, PreviewRequest, PreviewResponse
     from settings import AppSettings
     from database import Database
+    from preview import extract_preview
     from errors import install_error_handlers
 
 @asynccontextmanager
@@ -37,6 +39,11 @@ install_error_handlers(app)
 @app.get("/api/settings", response_model=SettingsResponse)
 def get_settings() -> SettingsResponse:
     return app.state.settings.public_settings()
+
+
+@app.post("/api/preview", response_model=PreviewResponse)
+def preview(request: PreviewRequest) -> PreviewResponse:
+    return extract_preview(request.url)
 
 
 @app.get("/api/health", response_model=HealthResponse)

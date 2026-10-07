@@ -1,0 +1,113 @@
+"""Metadata-only extraction and best-effort public-network validation."""
+import ipaddress
+import math
+import socket
+from urllib.parse import urlsplit
+
+from yt_dlp import YoutubeDL
+from yt_dlp.utils import DownloadError
+
+if __package__:
+    from .contracts import MediaFormat, PreviewItem, PreviewResponse, PreviewRequest
+    from .errors import ApiException
+else:
+    from contracts import MediaFormat, PreviewItem, PreviewResponse, PreviewRequest
+    from errors import ApiException
+
+
+def validate_target(url: str) -> str:
+    try:
+        url = PreviewRequest(url=url).url
+        parsed = urlsplit(url)
+        addresses = socket.getaddrinfo(parsed.hostname, parsed.port or (443 if parsed.scheme == 'https' else 80), type=socket.SOCK_STREAM)
+    except (ValueError, socket.gaierror):
+        raise ApiException(422, 'invalid_target', 'The link must resolve to a public HTTP or HTTPS address.') from None
+    if not addresses or any(not ipaddress.ip_address(address[4][0].split('%')[0]).is_global for address in addresses):
+        raise ApiException(422, 'blocked_target', 'Local and private network links are not allowed.')
+    return url
+
+
+class QuietLogger:
+    def debug(self, message):
+        pass
+    def warning(self, message):
+        pass
+    def error(self, message):
+        pass
+
+
+class PublicYoutubeDL(YoutubeDL):
+    def urlopen(self, request):
+        # Checks extractor-generated requests too. Transport redirects and DNS
+        # rebinding still require deployment-level egress restrictions.
+        validate_target(request if isinstance(request, str) else request.url)
+        return super().urlopen(request)
+
+
+def number(value, integer=False):
+    if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and value >= 0:
+        return int(value) if integer else value
+    return None
+
+
+def public_url(value):
+    if not isinstance(value, str):
+        return None
+    try:
+        return PreviewRequest(url=value).url
+    except ValueError:
+        return None
+
+
+def item_from_info(info, source_url, index=None):
+    formats = []
+    for fmt in info.get('formats') or []:
+        if not isinstance(fmt, dict) or not fmt.get('format_id') or not fmt.get('ext'):
+            continue
+        if fmt.get('vcodec') == 'none' and fmt.get('acodec') == 'none':
+            continue
+        formats.append(MediaFormat(
+            id=str(fmt['format_id']), extension=str(fmt['ext']),
+            video_codec=fmt.get('vcodec'), audio_codec=fmt.get('acodec'),
+            width=number(fmt.get('width'), True), height=number(fmt.get('height'), True),
+            filesize_bytes=number(fmt.get('filesize') or fmt.get('filesize_approx'), True),
+        ))
+    return PreviewItem(
+        id=str(info.get('id') or index or 'media'),
+        url=public_url(info.get('webpage_url')) or public_url(info.get('original_url')) or source_url,
+        title=str(info.get('title') or 'Untitled media'), uploader=info.get('uploader') or info.get('channel'),
+        thumbnail_url=public_url(info.get('thumbnail')), duration_seconds=number(info.get('duration')),
+        playlist_index=index, formats=formats,
+    )
+
+
+def extract_preview(url: str) -> PreviewResponse:
+    url = validate_target(url)
+    options = {
+        'quiet': True, 'no_warnings': True, 'logger': QuietLogger(),
+        'skip_download': True, 'cachedir': False, 'socket_timeout': 15,
+        'retries': 1, 'extractor_retries': 1, 'proxy': '',
+        'ignore_no_formats_error': True, 'playlistend': 100,
+    }
+    try:
+        with PublicYoutubeDL(options) as downloader:
+            info = downloader.extract_info(url, download=False)
+    except DownloadError as error:
+        text = str(error).lower()
+        if any(word in text for word in ('private', 'login', 'sign in', 'members-only', 'authentication', '403')):
+            raise ApiException(422, 'private_link', 'This link requires access or authentication.') from None
+        if 'unsupported url' in text or 'no suitable extractor' in text:
+            raise ApiException(422, 'unsupported_link', 'This link is not supported.') from None
+        raise ApiException(422, 'preview_failed', 'Could not inspect this link. Check that it is available and try again.') from None
+    if not isinstance(info, dict):
+        raise ApiException(422, 'preview_failed', 'No media metadata was returned for this link.')
+    if info.get('_type') in ('playlist', 'multi_video'):
+        items = []
+        for position, entry in enumerate(info.get('entries') or [], 1):
+            if isinstance(entry, dict):
+                index = number(entry.get('playlist_index'), True) or position
+                items.append(item_from_info(entry, url, index))
+        total = number(info.get('playlist_count') or info.get('n_entries'), True)
+        return PreviewResponse(source_url=url, kind='playlist', title=str(info.get('title') or 'Playlist'), items=items, total_items=total)
+    item = item_from_info(info, url)
+    return PreviewResponse(source_url=url, kind='video', title=item.title, items=[item], total_items=1)

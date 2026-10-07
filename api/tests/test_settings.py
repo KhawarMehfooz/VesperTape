@@ -24,7 +24,7 @@ class SettingsTests(unittest.TestCase):
             "VESPERTAPE_ALLOWED_FORMATS": '["mp3", "m4a"]',
         })
         public = settings.public_settings().model_dump()
-        self.assertEqual(settings.download_dir, Path("/tmp/vespertape-media"))
+        self.assertEqual(settings.download_dir, Path("/tmp/vespertape-media").resolve())
         self.assertEqual(public["worker_count"], 2)
         self.assertEqual(public["defaults"]["mode"], "audio")
         self.assertEqual(public["defaults"]["format"], "mp3")
@@ -60,7 +60,7 @@ class SettingsTests(unittest.TestCase):
             async with app.router.lifespan_context(app):
                 self.assertTrue(app.state.settings.download_dir.is_dir())
                 self.assertEqual(get_settings().worker_count, 3)
-                self.assertEqual(app.state.database.path, Path(root) / "vespertape.sqlite3")
+                self.assertEqual(app.state.database.path, Path(root).resolve() / "vespertape.sqlite3")
                 with app.state.database.connection() as connection:
                     self.assertEqual(connection.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0], 1)
 

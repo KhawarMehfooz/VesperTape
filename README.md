@@ -22,7 +22,7 @@ npm run dev
 
 Open the Vite URL it prints, usually `http://localhost:5173`. Vite proxies `/api` requests to the Docker API on port 8000.
 
-The current scaffold includes the app shell and an API health endpoint. Link inspection, job persistence, and downloads are not implemented yet.
+The app supports metadata-only link previews and playlist selection. Job persistence and downloads are not implemented yet.
 
 ## Run the API without Docker
 
@@ -54,8 +54,7 @@ Use `CreateJobInput` for job submissions; omitted settings use server defaults.
 Responses include all fields, with `null` for unavailable values. Playlist indexes
 are one-based; an empty selection means all items. Durations and ETA are seconds,
 and sizes and speeds use bytes and bytes per second. Destinations are configured
-names, not client-supplied filesystem paths. Preview and job endpoint wiring will
-be added in subsequent milestones.
+names, not client-supplied filesystem paths. The preview endpoint is available; job endpoint wiring follows in Milestone #3.
 
 ## Application configuration
 
@@ -129,4 +128,40 @@ must be unique positive integers. Destination names currently accept `default`;
 optional filenames must be a single safe name, at most 200 UTF-8 bytes, without
 yt-dlp template substitutions. Server allowlists are checked with
 `AppSettings.validate_download_settings()` when job submission is implemented.
-Network-target checks and link extraction remain part of Milestone #2.
+Preview links and extractor-generated requests are checked against public network addresses.
+
+
+## Link previews
+
+`POST /api/preview` accepts `{"url":"https://example.com/video"}` and returns
+`PreviewResponse`: source URL, video or playlist kind, title, items, and total
+playlist size when the extractor supplies it. Items include uploader, thumbnail,
+duration, and available media formats; unavailable metadata is `null`.
+Extraction uses yt-dlp with `download=False` and disables its disk cache.
+The UI displays loading, errors, empty playlists, and items without formats.
+
+Playlist previews inspect at most 100 entries to limit extraction work. Full
+playlist selection uses an empty `item_indices` list, while one-item and inclusive
+range selections use the original one-based playlist indexes visible in the
+preview. The full selection also includes entries beyond the preview limit when
+job submission is implemented. Selection is currently local to the preview UI;
+no download is queued. A private or unavailable entry may prevent previewing its
+playlist. Requests have a 15-second socket timeout and limited retries, but large
+playlists can still take time to inspect. Editing the URL cancels the browser
+request and discards stale responses; server extraction may finish in its thread.
+
+Preview errors use the shared envelope with `unsupported_link`, `private_link`,
+`preview_failed`, `invalid_target`, or `blocked_target`. Private-link detection
+uses yt-dlp's error messages and may vary between extractors. Raw extractor errors
+and submitted URLs are not logged by the preview service or echoed in errors.
+
+Only HTTP and HTTPS URLs without credentials are accepted. DNS answers must all
+be globally routable; loopback, private, link-local, and other non-public addresses
+are rejected for the source and extractor-generated requests. Ambient proxy
+configuration is disabled for previews. These are best-effort checks: transport
+redirects and DNS rebinding are not fully covered. Use network-level egress
+restrictions for untrusted deployments. Thumbnails load directly in the browser
+from the metadata URL with no referrer. Previews require outbound internet access
+and a working CA certificate bundle; site authentication is not configured yet.
+
+Run preview checks with `python -m unittest api.tests.test_preview`.
