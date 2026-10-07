@@ -1,7 +1,18 @@
-import { useRef, useState } from 'react'
-import type { ErrorResponse, PlaylistSelection, PreviewResponse } from './api/contracts'
+import { useEffect, useRef, useState } from 'react'
+import type { ErrorResponse, PlaylistSelection, PreviewResponse, JobResponse, JobsResponse } from './api/contracts'
 
 export default function App() {
+  const [jobs, setJobs] = useState<JobResponse[]>([])
+  const [feedError, setFeedError] = useState(false)
+  useEffect(() => {
+    const feed = new EventSource('/api/jobs/events')
+    feed.addEventListener('jobs', event => {
+      setJobs((JSON.parse((event as MessageEvent).data) as JobsResponse).jobs)
+      setFeedError(false)
+    })
+    feed.onerror = () => setFeedError(true)
+    return () => feed.close()
+  }, [])
   const [url, setUrl] = useState('')
   const [preview, setPreview] = useState<PreviewResponse | null>(null)
   const [loading, setLoading] = useState(false)
@@ -88,8 +99,25 @@ export default function App() {
               {item.formats.length ? <details><summary>{item.formats.length} available formats</summary><ul>{item.formats.map(format => <li key={format.id}>{format.id} · {format.extension} · {format.height ? `${format.height}p` : format.video_codec === 'none' ? 'Audio' : 'Media'}{format.filesize_bytes !== null ? ` · ${(format.filesize_bytes / 1048576).toFixed(1)} MB` : ''}</li>)}</ul></details> : <p role="status">No downloadable formats are available for this item.</p>}
             </div>
           </article>)}</div>
-          <div className="note">Adding downloads will be available when the persistent queue is implemented.</div>
+          <div className="note">Download submission controls are coming next. Queued jobs appear below.</div>
         </div>}
+      </section>
+      <section className="window" aria-label="Download queue">
+        <div className="titlebar">VESPERTAPE / DOWNLOAD QUEUE</div>
+        <div className="well">
+          {feedError && <p role="status">Live updates disconnected. Reconnecting…</p>}
+          {!jobs.length && <p>No downloads queued yet.</p>}
+          {jobs.map(job => <article className="media-item" key={job.id}>
+            <div><h3>{job.title ?? 'New download'}</h3><p>{job.status} · {job.output_name ?? 'Output pending'}</p>
+              {job.status === 'downloading' && <><progress max="100" value={job.progress.percent ?? undefined} aria-label="Download progress" /><p>
+                {job.progress.percent === null ? 'Size unknown' : `${job.progress.percent.toFixed(1)}%`}
+                {job.progress.speed_bytes_per_second !== null && ` · ${(job.progress.speed_bytes_per_second / 1048576).toFixed(2)} MB/s`}
+                {job.progress.eta_seconds !== null && ` · ${Math.ceil(job.progress.eta_seconds)}s remaining`}
+              </p></>}
+              {job.error && <p className="error">{job.error.message}</p>}
+            </div>
+          </article>)}
+        </div>
       </section>
     </main>
   )

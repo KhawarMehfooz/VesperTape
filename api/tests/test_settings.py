@@ -62,7 +62,7 @@ class SettingsTests(unittest.TestCase):
                 self.assertEqual(get_settings().worker_count, 3)
                 self.assertEqual(app.state.database.path, Path(root).resolve() / "vespertape.sqlite3")
                 with app.state.database.connection() as connection:
-                    self.assertEqual(connection.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0], 1)
+                    self.assertEqual(connection.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0], 2)
 
         with tempfile.TemporaryDirectory() as root, patch.dict(
             "os.environ",

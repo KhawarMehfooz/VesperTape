@@ -14,8 +14,7 @@ class Migration:
     statements: tuple[str, ...]
 
 
-# Append migrations; never edit migrations already shipped. Job tables belong
-# to the persistent queue milestone. The baseline establishes the version ledger.
+# Append migrations; never edit migrations already shipped.
 MIGRATIONS = (
     Migration(1, "baseline", (
         """CREATE TABLE schema_migrations (
@@ -23,6 +22,17 @@ MIGRATIONS = (
             name TEXT NOT NULL,
             applied_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
         )""",
+    )),
+    Migration(2, "persistent_jobs", (
+        """CREATE TABLE jobs (
+            id TEXT PRIMARY KEY,
+            status TEXT NOT NULL CHECK (status IN ('queued','downloading','paused','complete','canceled','failed')),
+            payload TEXT NOT NULL,
+            revision INTEGER NOT NULL
+        )""",
+        "CREATE INDEX jobs_queue ON jobs(status, revision)",
+        "CREATE TABLE queue_revision (id INTEGER PRIMARY KEY CHECK (id = 1), value INTEGER NOT NULL)",
+        "INSERT INTO queue_revision VALUES (1, 0)",
     )),
 )
 

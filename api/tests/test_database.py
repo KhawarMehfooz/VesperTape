@@ -20,7 +20,7 @@ class DatabaseTests(unittest.TestCase):
             self.assertEqual(connection.execute("PRAGMA journal_mode").fetchone()[0], "wal")
             self.assertEqual(connection.execute("PRAGMA foreign_keys").fetchone()[0], 1)
             rows = connection.execute("SELECT * FROM schema_migrations").fetchall()
-            self.assertEqual(len(rows), 1)
+            self.assertEqual(len(rows), len(MIGRATIONS))
             self.assertEqual(rows[0]["version"], 1)
             self.assertTrue(rows[0]["applied_at"].endswith("Z"))
         with self.assertRaises(sqlite3.ProgrammingError):
@@ -28,16 +28,16 @@ class DatabaseTests(unittest.TestCase):
 
     def test_upgrade_and_failed_migration_roll_back(self):
         self.database.initialize()
-        upgrade = Migration(2, "example", ("CREATE TABLE example (id INTEGER PRIMARY KEY)",))
+        upgrade = Migration(3, "example", ("CREATE TABLE example (id INTEGER PRIMARY KEY)",))
         self.database.initialize(MIGRATIONS + (upgrade,))
-        broken = Migration(3, "broken", (
+        broken = Migration(4, "broken", (
             "CREATE TABLE partial (id INTEGER)",
             "INSERT INTO nonexistent VALUES (1)",
         ))
         with self.assertRaises(sqlite3.OperationalError):
             self.database.initialize(MIGRATIONS + (upgrade, broken))
         with self.database.connection() as connection:
-            self.assertEqual(connection.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0], 2)
+            self.assertEqual(connection.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0], 3)
             self.assertIsNone(connection.execute("SELECT name FROM sqlite_master WHERE name='partial'").fetchone())
         with self.assertRaises(RuntimeError):
             self.database.initialize()
@@ -46,20 +46,20 @@ class DatabaseTests(unittest.TestCase):
         self.database.initialize()
         with self.assertRaises(RuntimeError):
             with self.database.connection() as connection:
-                connection.execute("INSERT INTO schema_migrations (version, name) VALUES (2, 'test')")
+                connection.execute("INSERT INTO schema_migrations (version, name) VALUES (3, 'test')")
                 raise RuntimeError("abort")
         with self.database.connection() as connection:
-            self.assertEqual(connection.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0], 1)
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0], len(MIGRATIONS))
 
     def test_concurrent_startups_apply_upgrade_once(self):
         self.database.initialize()
-        upgrade = Migration(2, "example", ("CREATE TABLE example (id INTEGER PRIMARY KEY)",))
+        upgrade = Migration(3, "example", ("CREATE TABLE example (id INTEGER PRIMARY KEY)",))
         with ThreadPoolExecutor(max_workers=2) as executor:
             futures = [executor.submit(self.database.initialize, MIGRATIONS + (upgrade,)) for _ in range(2)]
             for future in futures:
                 future.result()
         with self.database.connection() as connection:
-            self.assertEqual(connection.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0], 2)
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0], 3)
 
 
 if __name__ == "__main__":

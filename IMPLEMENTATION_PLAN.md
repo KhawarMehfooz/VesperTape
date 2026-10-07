@@ -9,7 +9,7 @@ Update milestone status and task checkboxes as work is completed.
 | 0. Project scaffold | Done |
 | 1. API and configuration | Done |
 | 2. Link preview | Done |
-| 3. Persistent queue and worker | Not started |
+| 3. Persistent queue and worker | Done |
 | 4. Core download UI | Not started |
 | 5. Download controls and history | Not started |
 | 6. Advanced options | Not started |
@@ -43,12 +43,12 @@ Update milestone status and task checkboxes as work is completed.
 
 ## 3. Persistent queue and worker
 
-- [ ] Store download jobs and status in SQLite.
-- [ ] Add `POST /api/jobs` to validate settings and enqueue a job.
-- [ ] Run one download at a time by default in a background worker.
-- [ ] Persist progress, speed, estimated time, output name, and failure details.
-- [ ] Resume queued or interrupted work safely after an app restart.
-- [ ] Send live job updates to the UI using Server-Sent Events.
+- [x] Store download jobs and status in SQLite.
+- [x] Add `POST /api/jobs` to validate settings and enqueue a job.
+- [x] Run one download at a time by default in a background worker.
+- [x] Persist progress, speed, estimated time, output name, and failure details.
+- [x] Resume queued or interrupted work safely after an app restart.
+- [x] Send live job updates to the UI using Server-Sent Events.
 
 ## 4. Core download UI
 

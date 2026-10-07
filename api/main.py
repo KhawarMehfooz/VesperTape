@@ -1,22 +1,27 @@
+import asyncio
 from pathlib import Path
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 if __package__:
-    from .contracts import ErrorResponse, HealthResponse, SettingsResponse, PreviewRequest, PreviewResponse
+    from .contracts import ErrorResponse, HealthResponse, SettingsResponse, PreviewRequest, PreviewResponse, CreateJobRequest, JobResponse, JobsResponse
     from .settings import AppSettings
     from .database import Database
-    from .preview import extract_preview
-    from .errors import install_error_handlers
+    from .preview import extract_preview, validate_target
+    from .errors import install_error_handlers, ApiException
+    from .jobs import JobStore
+    from .worker import WorkerPool
 else:
-    from contracts import ErrorResponse, HealthResponse, SettingsResponse, PreviewRequest, PreviewResponse
+    from contracts import ErrorResponse, HealthResponse, SettingsResponse, PreviewRequest, PreviewResponse, CreateJobRequest, JobResponse, JobsResponse
     from settings import AppSettings
     from database import Database
-    from preview import extract_preview
-    from errors import install_error_handlers
+    from preview import extract_preview, validate_target
+    from errors import install_error_handlers, ApiException
+    from jobs import JobStore
+    from worker import WorkerPool
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -26,7 +31,13 @@ async def lifespan(app: FastAPI):
     database.initialize()
     app.state.settings = settings
     app.state.database = database
-    yield
+    app.state.jobs = JobStore(database)
+    app.state.workers = WorkerPool(app.state.jobs, settings)
+    app.state.workers.start()
+    try:
+        yield
+    finally:
+        await asyncio.to_thread(app.state.workers.stop)
 
 
 app = FastAPI(
@@ -44,6 +55,54 @@ def get_settings() -> SettingsResponse:
 @app.post("/api/preview", response_model=PreviewResponse)
 def preview(request: PreviewRequest) -> PreviewResponse:
     return extract_preview(request.url)
+
+
+@app.post("/api/jobs", response_model=JobResponse, status_code=201)
+def create_job(request: CreateJobRequest) -> JobResponse:
+    # Resolve omitted nested settings against configured server defaults.
+    defaults = app.state.settings.public_settings().defaults.model_dump()
+    defaults.update(request.settings.model_dump(exclude_unset=True))
+    request.settings = request.settings.model_validate(defaults)
+    app.state.settings.validate_download_settings(request.settings)
+    settings = request.settings
+    audio_formats = {'auto', 'mp3', 'm4a', 'flac', 'wav'}
+    video_formats = {'auto', 'mp4', 'webm'}
+    if settings.format not in (audio_formats if settings.mode == 'audio' else video_formats):
+        raise ApiException(422, 'validation_error', 'The format is incompatible with the selected mode')
+    validate_target(request.url)
+    return app.state.jobs.create(request)
+
+
+@app.get("/api/jobs", response_model=JobsResponse)
+def list_jobs() -> JobsResponse:
+    return JobsResponse(jobs=app.state.jobs.snapshot()[1])
+
+
+@app.get("/api/jobs/events", response_class=StreamingResponse,
+         responses={200: {"content": {"text/event-stream": {"schema": {"type": "string"}}}}})
+async def job_events(request: Request):
+    async def stream():
+        revision = None
+        heartbeat = 0
+        while not await request.is_disconnected():
+            current, jobs = await asyncio.to_thread(app.state.jobs.snapshot)
+            if current != revision:
+                yield f'id: {current}\nevent: jobs\ndata: {JobsResponse(jobs=jobs).model_dump_json()}\n\n'
+                revision = current
+                heartbeat = 0
+            elif heartbeat >= 15:
+                yield ': keepalive\n\n'
+                heartbeat = 0
+            heartbeat += 1
+            await asyncio.sleep(1)
+    return StreamingResponse(stream(), media_type="text/event-stream", headers={
+        'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no',
+    })
+
+
+@app.get("/api/jobs/{job_id}", response_model=JobResponse)
+def get_job(job_id: str) -> JobResponse:
+    return app.state.jobs.get(job_id)
 
 
 @app.get("/api/health", response_model=HealthResponse)

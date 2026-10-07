@@ -22,7 +22,8 @@ npm run dev
 
 Open the Vite URL it prints, usually `http://localhost:5173`. Vite proxies `/api` requests to the Docker API on port 8000.
 
-The app supports metadata-only link previews and playlist selection. Job persistence and downloads are not implemented yet.
+The app supports link previews, playlist selection, and a live persistent download queue.
+Download submission is available through the API; UI submission controls follow in milestone 4.
 
 ## Run the API without Docker
 
@@ -54,7 +55,7 @@ Use `CreateJobInput` for job submissions; omitted settings use server defaults.
 Responses include all fields, with `null` for unavailable values. Playlist indexes
 are one-based; an empty selection means all items. Durations and ETA are seconds,
 and sizes and speeds use bytes and bytes per second. Destinations are configured
-names, not client-supplied filesystem paths. The preview endpoint is available; job endpoint wiring follows in Milestone #3.
+names, not client-supplied filesystem paths. The preview and job endpoints are available.
 
 ## Application configuration
 
@@ -65,7 +66,7 @@ or unusable storage directories stop startup. Restart the API after changes.
 | --- | --- | --- |
 | `VESPERTAPE_DATA_DIR` | `data` locally, `/data` in Docker | Application storage |
 | `VESPERTAPE_DOWNLOAD_DIR` | `<data directory>/downloads` | Download storage |
-| `VESPERTAPE_WORKER_COUNT` | `1` | Positive integer; used when workers are implemented |
+| `VESPERTAPE_WORKER_COUNT` | `1` | Positive integer; concurrent downloads (default: one) |
 | `VESPERTAPE_ALLOWED_MODES` | `["video","audio"]` | JSON array of allowed modes |
 | `VESPERTAPE_ALLOWED_QUALITIES` | `["best","1080p","720p","480p"]` | JSON array of allowed qualities |
 | `VESPERTAPE_ALLOWED_FORMATS` | `["auto","mp4","webm","mp3","m4a","flac","wav"]` | JSON array of allowed formats |
@@ -97,8 +98,7 @@ always close.
 Startup takes a write lock, checks the `schema_migrations` ledger, and applies
 pending migrations in one transaction. Failed migrations stop startup and roll
 back schema changes and ledger entries. A database with newer or incompatible
-migration history also stops startup. The baseline establishes the ledger; job
-tables will be added in Milestone #3.
+migration history also stops startup. The baseline establishes the ledger; migration 2 adds jobs and the queue revision.
 
 Append consecutive migrations with individual SQL statements; keep released
 migrations unchanged. Automatic downgrades are not supported. Before upgrading,
@@ -127,7 +127,7 @@ URL requests accept HTTP or HTTPS without embedded credentials. Playlist indexes
 must be unique positive integers. Destination names currently accept `default`;
 optional filenames must be a single safe name, at most 200 UTF-8 bytes, without
 yt-dlp template substitutions. Server allowlists are checked with
-`AppSettings.validate_download_settings()` when job submission is implemented.
+`AppSettings.validate_download_settings()` on submission.
 Preview links and extractor-generated requests are checked against public network addresses.
 
 
@@ -143,9 +143,8 @@ The UI displays loading, errors, empty playlists, and items without formats.
 Playlist previews inspect at most 100 entries to limit extraction work. Full
 playlist selection uses an empty `item_indices` list, while one-item and inclusive
 range selections use the original one-based playlist indexes visible in the
-preview. The full selection also includes entries beyond the preview limit when
-job submission is implemented. Selection is currently local to the preview UI;
-no download is queued. A private or unavailable entry may prevent previewing its
+preview. The full selection also includes entries beyond the preview limit through the job API. Selection is currently local to the preview UI;
+submit the same selection to the job API to enqueue a download. A private or unavailable entry may prevent previewing its
 playlist. Requests have a 15-second socket timeout and limited retries, but large
 playlists can still take time to inspect. Editing the URL cancels the browser
 request and discards stale responses; server extraction may finish in its thread.
@@ -165,3 +164,63 @@ from the metadata URL with no referrer. Previews require outbound internet acces
 and a working CA certificate bundle; site authentication is not configured yet.
 
 Run preview checks with `python -m unittest api.tests.test_preview`.
+
+
+## Persistent downloads
+
+`POST /api/jobs` validates a public source URL and settings, persists the job, and
+returns HTTP 201 with a `JobResponse`. Omitted settings use configured server
+defaults, including partially specified settings. Audio accepts `auto`, `mp3`,
+`m4a`, `flac`, or `wav`; video accepts `auto`, `mp4`, or `webm`. Incompatible
+mode/format combinations and disabled server options return HTTP 422.
+
+```sh
+curl -X POST http://localhost:8000/api/jobs \
+  -H 'Content-Type: application/json' \
+  -d '{"url":"https://example.com/video","selection":{"item_indices":[]},"settings":{"mode":"video","quality":"720p","format":"mp4"}}'
+```
+
+Replace the example URL with a supported public media URL. Empty playlist indexes
+select the entire playlist; explicit indexes select those original one-based
+entries. Job creation checks network eligibility; media availability and playlist
+index existence are checked during extraction, with failures persisted on the job.
+`GET /api/jobs` lists persisted jobs in submission order, and
+`GET /api/jobs/{id}` retrieves one job. Raw extractor exceptions are never included
+in failure responses.
+
+Workers claim queued jobs atomically in submission order. The default worker count
+is one; increase `VESPERTAPE_WORKER_COUNT` for parallel jobs. Run one API process
+per data directory (no `uvicorn --workers`); a process lock prevents another API
+instance from resetting active work during startup. Each job writes beneath
+`<download directory>/<job ID>/`, with media IDs and playlist indexes in filenames
+to avoid collisions. Audio conversion and video merging/remuxing require FFmpeg,
+which is installed in Docker. Local API execution needs FFmpeg on PATH.
+
+Progress is saved at most twice per second, plus transfer-finished updates. Speed,
+ETA, and byte totals may be unavailable. Progress describes the current playlist
+item or media stream, rather than an aggregate across the entire playlist. A job
+stays downloading during post-processing and becomes complete only after yt-dlp
+returns successfully and output exists. `output_name` is the last completed
+media filename for a playlist. A failed playlist can retain successfully downloaded
+items; its failure status remains visible.
+
+Shutdown stops claiming work and interrupts active jobs at the next transfer or
+post-processing hook. Extraction and FFmpeg may need time to reach that point.
+Interrupted jobs return to queued; startup also requeues jobs left downloading by
+a crash. Partial files and a per-job yt-dlp archive are retained: compatible partial
+transfers resume and completed playlist items are skipped. Recovery requires the
+same persistent download volume; source changes or servers without resume support
+can cause a transfer to restart. Paused, failed, and completed jobs are not
+requeued automatically. Pause/cancel/retry controls follow in milestone 5.
+
+`GET /api/jobs/events` streams `event: jobs` messages containing a full
+`JobsResponse`, with a durable revision as the event ID. Every connection receives
+a current snapshot, including reconnections; intermediate transfer ticks are
+coalesced. The feed checks for changes once per second and sends idle heartbeats
+every 15 seconds. The React queue uses EventSource and reconnects automatically.
+Reverse proxies should disable buffering for this endpoint.
+
+Run queue, worker, API, and feed checks with
+`python -m unittest api.tests.test_jobs`. Tests use controlled downloads and
+temporary SQLite storage; a live media/FFmpeg and Docker restart smoke test remains
+part of milestone 8.
