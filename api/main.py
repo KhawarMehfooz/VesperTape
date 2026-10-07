@@ -54,7 +54,7 @@ def get_settings() -> SettingsResponse:
 
 @app.post("/api/preview", response_model=PreviewResponse)
 def preview(request: PreviewRequest) -> PreviewResponse:
-    return extract_preview(request.url)
+    return extract_preview(request.url, app.state.settings.cookie_file)
 
 
 @app.post("/api/jobs", response_model=JobResponse, status_code=201)

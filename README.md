@@ -53,7 +53,7 @@ npm run dev
 Open the Vite URL it prints, usually `http://localhost:5173`. Vite proxies `/api` requests to the Docker API on port 8000.
 
 The app supports link previews, playlist selection, and a live persistent download queue.
-The Classic Download Window layout (variant A of the design study) supports previewing a link, selecting playlist items, and adding audio or video downloads. Controls use server defaults and allowed options. Choose quality, format, a configured server destination, and an optional file name; API validation errors appear beside the submission controls. The app uses the static study’s original Classic Window markup, CSS, icons, panels, and responsive rules, with simplified VesperTape branding. Advanced options are displayed but disabled until supported by the API. The layout stacks at 700px and uses single-column settings at 410px.
+The Classic Download Window layout (variant A of the design study) supports previewing a link, selecting playlist items, and adding audio or video downloads. Controls use server defaults and allowed options. Choose quality, format, a configured server destination, and an optional file name; API validation errors appear beside the submission controls. The app uses the static study’s original Classic Window markup, CSS, icons, panels, and responsive rules, with simplified VesperTape branding. Advanced options support subtitles, metadata, thumbnails, chapters, remuxing, playlist filters, archives, output templates, and network settings. The layout stacks at 700px and uses single-column settings at 410px.
 
 ## Run the API without Docker
 
@@ -192,7 +192,7 @@ configuration is disabled for previews. These are best-effort checks: transport
 redirects and DNS rebinding are not fully covered. Use network-level egress
 restrictions for untrusted deployments. Thumbnails load directly in the browser
 from the metadata URL with no referrer. Previews require outbound internet access
-and a working CA certificate bundle; site authentication is not configured yet.
+and a working CA certificate bundle; previews use the protected server cookie file when configured.
 
 Run preview checks with `python -m unittest api.tests.test_preview`.
 
@@ -263,7 +263,7 @@ part of milestone 8.
 
 From `web/`, run `npm run build` and `npm test`. On a new machine, install the test browser with `npx playwright install chromium`. Browser tests use controlled API responses to check playlist submissions, compatible format switching, validation errors, selection guards, and the mobile layout. They do not download live media.
 
-If a preview reports YouTube verification or rate limiting, YouTube is restricting requests from the downloader server’s network. Wait before retrying. A valid URL does not guarantee access from the server; persistent verification may require server-side cookies (planned with the advanced authentication options). Preview extraction reports these errors instead of accepting incomplete metadata with no formats.
+If a preview reports YouTube verification or rate limiting, YouTube is restricting requests from the downloader server’s network. Wait before retrying. A valid URL does not guarantee access from the server; persistent verification may require the protected server-side cookie file described below. Preview extraction reports these errors instead of accepting incomplete metadata with no formats.
 
 ### Download controls and history
 
@@ -286,3 +286,88 @@ API controls: `POST /api/jobs/{id}/actions` with an `action` of `pause`, `resume
 `cancel`, or `retry`; `DELETE /api/jobs/{id}` removes a terminal job;
 `GET /api/jobs/{id}/files/{filename}` retrieves a completed output.
 Invalid state transitions return 409 and unknown jobs return 404.
+
+
+## Advanced options
+
+Expand **More ways to customize** before adding a download. Settings persist with
+that job and are reused on retry. Existing jobs receive backward-compatible defaults.
+
+- Download uploaded subtitles and/or automatic captions, choose comma-separated
+  language codes (or `all`), convert to SRT/VTT/ASS, and embed subtitles in video.
+  Embedding does not automatically enable subtitle downloading; select both.
+- Embed metadata, thumbnail images, or chapter markers; save thumbnails separately;
+  split chapters into additional files; or remux video to MP4, MKV, or WebM.
+  These operations require FFmpeg and source metadata. Container support varies;
+  an incompatible choice can fail during post-processing. Remux overrides the
+  video container control and does not re-encode incompatible codecs.
+- Filter the selected playlist using inclusive start/end indexes and minimum/maximum
+  duration in seconds. Blank optional limits mean no limit. Items without a known
+  duration do not match duration filters. A range excluding every explicitly
+  selected index fails rather than downloading the full playlist.
+- Enable the shared download archive to skip previously archived media IDs.
+  The archive lives in the persistent data directory and applies only to
+  archive-enabled jobs. It is updated after a successful job, including file-rule
+  skips. It is independent of history removal and does not check whether old
+  files still exist. Concurrent jobs may both download an item before either
+  commits its archive; keep one worker to avoid that overlap. Every job also keeps
+  its own recovery archive so resume/retry can skip already completed items.
+- Set a filename stem template using `%(title)s`, `%(id)s`, `%(uploader)s`, or
+  `%(playlist_index)03d`; title truncation such as `%(title).120B` is supported.
+  Paths, arbitrary fields, and extension substitutions are rejected. The worker
+  adds media ID, playlist index, and the output extension, sanitizes filenames,
+  and limits their length. Choose either a custom filename or a template.
+- Choose `rename` (default, numbered suffix), `skip` (preserve the existing file),
+  or `fail` for destination conflicts. Files are never overwritten. Skipped
+  existing files do not receive new history download links. A job with everything
+  skipped by archive, duration filters, or file rules completes with no new files.
+  A failed job can leave already published files; retries apply the same rules.
+- Set 0–20 transfer/fragment retries, a rate limit in bytes per second (blank for
+  unlimited), and 1–16 concurrent fragments. HTTP/HTTPS/SOCKS5 proxies must resolve
+  to public addresses and cannot contain credentials. Public-network checks still
+  apply to extracted URLs; a proxy changes where requests are sent, so use a
+  trusted proxy. These network settings apply to downloads, not previews.
+- Supply one HTTP header per line. The allowlist accepts `User-Agent`, `Referer`,
+  `Origin`, and `Accept-Language`; duplicate names and control characters are
+  rejected. Authentication headers and cookie contents are not accepted. These
+  header values and proxy URLs are persisted in job settings, so do not put
+  credentials in them.
+
+Custom yt-dlp options are restricted to `--prefer-free-formats`, `--no-playlist`,
+`--playlist-reverse`, and `--check-formats`. The API accepts these exact strings
+in `settings.custom_options` and rejects all other options before creating a job.
+The UI exposes the same allowlist. No arbitrary command, filesystem path,
+postprocessor, or raw command-line parsing is exposed.
+
+### Protected server cookies
+
+Export a Netscape-format cookie file on the downloader host. Browser cookies must
+be available on that host; they do **not** come from the user's device or browser
+session automatically. Browser-profile extraction and cookie uploads are not
+supported. Keep the file outside this repository and the download volume.
+
+For Docker, set `VESPERTAPE_HOST_COOKIE_FILE` in the ignored `.env` to its absolute
+host path, then use the optional read-only mount:
+
+```sh
+docker compose -f docker-compose.yml -f docker-compose.cookies.yml up --build -d
+```
+
+Ensure the container's configured UID/GID can read it. On Linux, use a file owned
+by that UID with mode `600`, or a restricted matching group with mode `640`.
+The file must not be accessible to other users; mode `644` is rejected. Docker
+Desktop may require sharing its host folder. The override does not create a
+missing cookie file or change its permissions. Use both Compose files in later
+startup/rebuild commands to keep cookies enabled.
+
+For local API execution, export `VESPERTAPE_COOKIE_FILE=/absolute/path/cookies.txt`.
+Startup verifies a readable regular file with no permissions for other users and
+rejects a symlink. The API exposes only whether a file is configured, never its
+path or contents. Previews use it automatically; jobs use it when **Use server
+cookie file** is checked. yt-dlp receives a temporary private copy, deleted after
+extraction, so the original read-only file is never modified. Refresh exported
+cookies on the host when they expire; authentication does not guarantee YouTube
+will accept the downloader's network.
+
+The mappings use yt-dlp's [documented Python options](https://github.com/yt-dlp/yt-dlp/blob/master/yt_dlp/YoutubeDL.py)
+and [post-processing options](https://github.com/yt-dlp/yt-dlp#post-processing-options).

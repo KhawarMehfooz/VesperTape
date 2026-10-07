@@ -1,211 +1,62 @@
-export default function AdvancedOptions() {
-  return (
-<details className="advanced-options">
-<summary>More ways to customize <span>subtitles · playlists · quality</span>
-</summary>
-<p className="adv-note">These advanced settings are not available yet.</p>
-<fieldset className="unavailable-options" disabled>
-<div className="adv-grid">
-<section className="adv-card">
-<h3>Format selection</h3>
-<div className="setting">
-<div className="setting-title">Format rule</div>
-<select className="fake-select">
-<option>Best video + best audio</option>
-<option>Best single-file format</option>
-<option>Best video only</option>
-<option>Custom format selector</option>
-</select>
-</div>
-<div className="setting">
-<div className="setting-title">Sort preference</div>
-<select className="fake-select">
-<option>Resolution, then codec</option>
-<option>File size, then resolution</option>
-<option>Frame rate, then resolution</option>
-<option>Source preference</option>
-</select>
-</div>
-<label className="check">
-<input type="checkbox" defaultChecked /> Verify selected formats are downloadable</label>
-<label className="check">
-<input type="checkbox" /> Allow multiple audio/video streams</label>
-</section>
-<section className="adv-card">
-<h3>Subtitles & captions</h3>
-<label className="check">
-<input type="checkbox" /> Download uploaded subtitles</label>
-<label className="check">
-<input type="checkbox" /> Include auto-generated captions</label>
-<div className="adv-pair" style={{ marginTop: '7px' }}>
-<div>
-<div className="setting-title">Languages</div>
-<input className="adv-input" type="text" defaultValue="en" aria-label="Subtitle languages" />
-</div>
-<div>
-<div className="setting-title">Subtitle format</div>
-<select className="fake-select">
-<option>SRT</option>
-<option>VTT</option>
-<option>ASS</option>
-<option>Best available</option>
-</select>
-</div>
-</div>
-<label className="check">
-<input type="checkbox" defaultChecked /> Embed subtitles in video when possible</label>
-</section>
-<section className="adv-card">
-<h3>Playlist & archive</h3>
-<label className="check">
-<input type="checkbox" /> Skip items already in download archive</label>
-<label className="check">
-<input type="checkbox" /> Keep playlist folders and numbering</label>
-<div className="adv-pair" style={{ marginTop: '7px' }}>
-<div>
-<div className="setting-title">Maximum items</div>
-<input className="adv-input" type="number" min="1" defaultValue="0" aria-label="Maximum playlist items" />
-</div>
-<div>
-<div className="setting-title">Start at item</div>
-<input className="adv-input" type="number" min="1" defaultValue="1" aria-label="Playlist start item" />
-</div>
-</div>
-<div className="setting-title" style={{ marginTop: '7px' }}>Optional item filter</div>
-<input className="adv-input" type="text" placeholder="Date range or minimum views" />
-<div className="adv-note">Maximum 0 means no limit. Playlist selection is also available above.</div>
-</section>
-<section className="adv-card">
-<h3>Network & retries</h3>
-<div className="adv-pair">
-<div>
-<div className="setting-title">Rate limit</div>
-<input className="adv-input" type="text" placeholder="No limit" />
-</div>
-<div>
-<div className="setting-title">Retries</div>
-<input className="adv-input" type="number" min="0" defaultValue="10" />
-</div>
-</div>
-<div className="adv-pair" style={{ marginTop: '7px' }}>
-<div>
-<div className="setting-title">Concurrent fragments</div>
-<input className="adv-input" type="number" min="1" defaultValue="1" />
-</div>
-<div>
-<div className="setting-title">Proxy</div>
-<input className="adv-input" type="text" placeholder="Optional proxy URL" />
-</div>
-</div>
-<div className="setting-title" style={{ marginTop: '7px' }}>Additional HTTP headers</div>
-<textarea className="adv-textarea" placeholder="One header per line">
-</textarea>
-</section>
-<section className="adv-card">
-<h3>Access & authentication</h3>
-<div className="auth-settings">
-<div className="setting-title">Cookie source</div>
-<div className="auth-modes" role="radiogroup" aria-label="Cookie source">
-<div className="auth-mode">
-<input type="radio" name="auth-a" id="auth-none-a" defaultChecked />
-<label htmlFor="auth-none-a">None</label>
-</div>
-<div className="auth-mode">
-<input className="browser-cookie-choice" type="radio" name="auth-a" id="auth-browser-a" />
-<label htmlFor="auth-browser-a">Browser</label>
-</div>
-<div className="auth-mode">
-<input className="cookie-file-choice" type="radio" name="auth-a" id="auth-file-a" />
-<label htmlFor="auth-file-a">Cookie file</label>
-</div>
-</div>
-<div className="cookie-panel browser-cookie-fields">
-<div className="adv-pair">
-<div>
-<div className="setting-title">Browser</div>
-<select className="fake-select">
-<option>Chrome</option>
-<option>Chromium</option>
-<option>Firefox</option>
-<option>Edge</option>
-<option>Brave</option>
-<option>Vivaldi</option>
-<option>Opera</option>
-</select>
-</div>
-<div>
-<div className="setting-title">Profile</div>
-<input className="adv-input" type="text" defaultValue="Default" aria-label="Browser profile" />
-</div>
-</div>
-<label className="check">
-<input type="checkbox" defaultChecked /> Use browser keyring when available</label>
-<div className="adv-note">yt-dlp reads this profile on the downloader host. A browser on your current device is not shared automatically.</div>
-</div>
-<div className="cookie-panel cookie-file-fields">
-<div className="setting-title">Cookie file on downloader host</div>
-<div className="path-row">
-<input className="url-input" type="text" placeholder="/config/cookies.txt" aria-label="Cookie file path" />
-<button className="bevel-btn" type="button">BROWSE</button>
-</div>
-<div className="adv-note">Use a protected Netscape-format cookie file. Avoid pasting cookie contents here.</div>
-</div>
-</div>
-<label className="check">
-<input type="checkbox" /> Use credentials stored on the server</label>
-<label className="check">
-<input type="checkbox" /> Allow geo-bypass when supported</label>
-<div className="adv-note">Your sign-in details stay on your VesperTape server.</div>
-</section>
-<section className="adv-card">
-<h3>Metadata & post-processing</h3>
-<label className="check">
-<input type="checkbox" defaultChecked /> Embed metadata</label>
-<label className="check">
-<input type="checkbox" /> Write description and info JSON files</label>
-<label className="check">
-<input type="checkbox" /> Save thumbnail as a separate file</label>
-<label className="check">
-<input type="checkbox" /> Split chapters into separate files</label>
-<div className="setting-title" style={{ marginTop: '7px' }}>Remux video container</div>
-<select className="fake-select">
-<option>Keep source / best compatible</option>
-<option>MP4</option>
-<option>MKV</option>
-<option>WebM</option>
-</select>
-</section>
-<section className="adv-card">
-<h3>File handling</h3>
-<div className="setting-title">Temporary files folder</div>
-<input className="adv-input" type="text" placeholder="Use default temporary folder" />
-<div className="adv-pair" style={{ marginTop: '7px' }}>
-<div>
-<div className="setting-title">Subtitle folder</div>
-<input className="adv-input" type="text" placeholder="Same as download" />
-</div>
-<div>
-<div className="setting-title">Thumbnail folder</div>
-<input className="adv-input" type="text" placeholder="Same as download" />
-</div>
-</div>
-<div className="setting-title" style={{ marginTop: '7px' }}>If filename already exists</div>
-<select className="fake-select">
-<option>Skip existing file</option>
-<option>Ask before replacing</option>
-<option>Overwrite</option>
-<option>Add a number suffix</option>
-</select>
-</section>
-<section className="adv-card">
-<h3>Custom yt-dlp arguments</h3>
-<div className="adv-note" style={{ margin: '0 0 6px' }}>For options without a dedicated control. For advanced users: add one extra yt-dlp option per line.</div>
-<textarea className="adv-textarea" style={{ minHeight: '69px' }} placeholder="--option-name&#10;--another-option=value">
-</textarea>
-<div className="adv-note">Arguments should be validated by the server before a job is queued.</div>
-</section>
-</div>
-</fieldset>
-</details>
-  )
+import type { DownloadSettings } from './api/contracts'
+
+type Props = {
+  settings: DownloadSettings
+  updateSettings: (patch: Partial<DownloadSettings>) => void
+  cookieFileAvailable: boolean
+}
+
+export default function AdvancedOptions({ settings: s, updateSettings: update, cookieFileAvailable }: Props) {
+  const check = (key: keyof DownloadSettings, label: string, disabled = false) => <label className="check"><input type="checkbox" checked={Boolean(s[key])} disabled={disabled} onChange={e => update({ [key]: e.target.checked })} />{label}</label>
+  const number = (key: keyof DownloadSettings, label: string, min: number, max?: number) => <label className="setting"><span className="setting-title">{label}</span><input aria-label={label} className="adv-input" type="number" min={min} max={max} value={s[key] as number ?? ''} onChange={e => update({ [key]: e.target.value === '' ? null : Number(e.target.value) })} /></label>
+  const select = (key: keyof DownloadSettings, label: string, values: string[]) => <label className="setting"><span className="setting-title">{label}</span><select aria-label={label} className="fake-select" value={s[key] as string} onChange={e => update({ [key]: e.target.value })}>{values.map(value => <option key={value} value={value}>{value}</option>)}</select></label>
+  return <details className="advanced-options">
+    <summary>More ways to customize <span>subtitles · playlists · network</span></summary>
+    <div className="adv-grid">
+      <section className="adv-card"><h3>Subtitles & captions</h3>
+        {check('subtitles', 'Download uploaded subtitles')}
+        {check('automatic_captions', 'Include auto-generated captions')}
+        <label className="setting"><span className="setting-title">Subtitle languages</span><input aria-label="Subtitle languages" className="adv-input" defaultValue={(s.subtitle_languages ?? ['en']).join(', ')} onBlur={e => update({ subtitle_languages: e.target.value.split(',').map(v => v.trim()) })} /></label>
+        <div className="adv-note">Comma-separated language codes, such as en, en-US, or all.</div>
+        {select('subtitle_format', 'Subtitle format', ['best', 'srt', 'vtt', 'ass'])}
+        {check('embed_subtitles', 'Embed subtitles in video', s.mode === 'audio')}
+      </section>
+      <section className="adv-card"><h3>Metadata & post-processing</h3>
+        {check('embed_metadata', 'Embed metadata')}
+        {check('save_thumbnail', 'Save thumbnail as a separate file')}
+        {check('embed_thumbnail', 'Embed thumbnail when supported')}
+        {check('embed_chapters', 'Keep chapter markers')}
+        {check('split_chapters', 'Split chapters into separate files')}
+        {s.mode === 'video' && select('remux', 'Remux video container', ['auto', 'mp4', 'mkv', 'webm'])}
+        <div className="adv-note">Embedding depends on the chosen container and available source metadata.</div>
+      </section>
+      <section className="adv-card"><h3>Playlist & archive</h3>
+        {check('use_archive', 'Skip items already in the server archive')}
+        <div className="adv-pair">{number('playlist_start', 'Playlist start item', 1, 100000)}{number('playlist_end', 'Playlist end item', 1, 100000)}</div>
+        <div className="adv-pair">{number('minimum_duration', 'Minimum duration (seconds)', 0)}{number('maximum_duration', 'Maximum duration (seconds)', 0)}</div>
+        <div className="adv-note">Filters apply to the selection above. Blank end or duration means no limit. The archive is shared across archive-enabled jobs.</div>
+      </section>
+      <section className="adv-card"><h3>File handling</h3>
+        <label className="setting"><span className="setting-title">Output template</span><input aria-label="Output template" className="adv-input" value={s.output_template ?? ''} placeholder="%(title).120B" onChange={e => update({ output_template: e.target.value || null })} /></label>
+        <div className="adv-note">Filename stem only. Supports title, id, uploader, and playlist_index. Media ID and playlist index are added for uniqueness. Use either this or your own file name.</div>
+        {select('file_conflict', 'If filename already exists', ['rename', 'skip', 'fail'])}
+        <div className="adv-note">Rename adds a number suffix. Skip keeps the existing file; fail reports a conflict.</div>
+      </section>
+      <section className="adv-card"><h3>Network & retries</h3>
+        <div className="adv-pair">{number('retry_count', 'Retries', 0, 20)}{number('fragment_concurrency', 'Concurrent fragments', 1, 16)}</div>
+        {number('rate_limit', 'Rate limit (bytes per second)', 1, 1000000000)}
+        <label className="setting"><span className="setting-title">Proxy</span><input aria-label="Proxy" className="adv-input" value={s.proxy ?? ''} placeholder="https://proxy.example:8080" onChange={e => update({ proxy: e.target.value || null })} /></label>
+        <label className="setting"><span className="setting-title">Additional HTTP headers</span><textarea aria-label="Additional HTTP headers" className="adv-textarea" defaultValue={(s.http_headers ?? []).join('\n')} placeholder="User-Agent: VesperTape" onBlur={e => update({ http_headers: e.target.value.split('\n').filter(v => v.trim()) })} /></label>
+        <div className="adv-note">One header per line: User-Agent, Referer, Origin, or Accept-Language. Proxy credentials and authentication headers are not accepted.</div>
+      </section>
+      <section className="adv-card"><h3>Access & authentication</h3>
+        {check('use_cookie_file', 'Use server cookie file', !cookieFileAvailable)}
+        <div className="adv-note">{cookieFileAvailable ? 'A protected cookie file is configured on the downloader host. Previews use it automatically.' : 'Configure a protected cookie file on the downloader host to enable this option.'} Browser cookies must be available on that host; they do not come from your current device.</div>
+      </section>
+      <section className="adv-card"><h3>Custom yt-dlp options</h3>
+        {(['--prefer-free-formats', '--no-playlist', '--playlist-reverse', '--check-formats'] as const).map(option => <label className="check" key={option}><input type="checkbox" checked={(s.custom_options ?? []).includes(option)} onChange={e => update({ custom_options: e.target.checked ? [...(s.custom_options ?? []), option] : s.custom_options.filter(v => v !== option) })} />{option}</label>)}
+        <div className="adv-note">Only these allowlisted options are accepted by the server.</div>
+      </section>
+    </div>
+  </details>
 }

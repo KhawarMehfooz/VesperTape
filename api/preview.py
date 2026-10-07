@@ -2,6 +2,10 @@
 import ipaddress
 import math
 import socket
+import shutil
+import tempfile
+from contextlib import contextmanager
+from pathlib import Path
 from urllib.parse import urlsplit
 
 from yt_dlp import YoutubeDL
@@ -44,6 +48,22 @@ class PublicYoutubeDL(YoutubeDL):
         return super().urlopen(request)
 
 
+@contextmanager
+def cookie_options(cookie_file):
+    """yt-dlp writes its jar on exit; never modify the protected host file."""
+    if cookie_file is None:
+        yield {}
+        return
+    path = Path(cookie_file)
+    if path.is_symlink() or not path.is_file() or path.stat().st_mode & 0o007:
+        raise ApiException(422, 'cookie_file_unavailable', 'The server cookie file is unavailable.')
+    with tempfile.TemporaryDirectory(prefix='vespertape-cookies-') as directory:
+        target = Path(directory) / 'cookies.txt'
+        shutil.copyfile(path, target)
+        target.chmod(0o600)
+        yield {'cookiefile': str(target)}
+
+
 def number(value, integer=False):
     if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and value >= 0:
         return int(value) if integer else value
@@ -81,7 +101,7 @@ def item_from_info(info, source_url, index=None):
     )
 
 
-def extract_preview(url: str) -> PreviewResponse:
+def extract_preview(url: str, cookie_file=None) -> PreviewResponse:
     url = validate_target(url)
     options = {
         'quiet': True, 'no_warnings': True, 'logger': QuietLogger(),
@@ -90,7 +110,7 @@ def extract_preview(url: str) -> PreviewResponse:
         'js_runtimes': {'node': {}}, 'playlistend': 100,
     }
     try:
-        with PublicYoutubeDL(options) as downloader:
+        with cookie_options(cookie_file) as cookies, PublicYoutubeDL({**options, **cookies}) as downloader:
             info = downloader.extract_info(url, download=False)
     except DownloadError as error:
         text = str(error).lower()

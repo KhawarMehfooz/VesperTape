@@ -1,10 +1,10 @@
 import { expect, test } from '@playwright/test'
 
-const defaults = { mode: 'video', quality: 'best', format: 'auto', destination: 'default', filename: null }
+const defaults = {"mode": "video", "quality": "best", "format": "auto", "destination": "default", "filename": null, "subtitles": false, "automatic_captions": false, "subtitle_languages": ["en"], "subtitle_format": "best", "embed_subtitles": false, "embed_metadata": false, "save_thumbnail": false, "embed_thumbnail": false, "embed_chapters": false, "split_chapters": false, "remux": "auto", "use_archive": false, "playlist_start": 1, "playlist_end": null, "minimum_duration": null, "maximum_duration": null, "output_template": null, "file_conflict": "rename", "retry_count": 3, "rate_limit": null, "fragment_concurrency": 1, "proxy": null, "http_headers": [], "use_cookie_file": false, "custom_options": []}
 const item = (index: number) => ({ id: String(index), url: `https://example.com/${index}`, title: `Video ${index}`, uploader: 'Uploader', thumbnail_url: null, duration_seconds: 60, playlist_index: index, formats: [{ id: '1', extension: 'mp4', video_codec: 'h264', audio_codec: 'aac', width: 1280, height: 720, filesize_bytes: null }] })
 
 test.beforeEach(async ({ page }) => {
-  await page.route('**/api/settings', route => route.fulfill({ json: { defaults, allowed_modes: ['video', 'audio'], allowed_qualities: ['best', '720p'], allowed_formats: ['auto', 'mp4', 'mp3'], destinations: ['default'], worker_count: 1 } }))
+  await page.route('**/api/settings', route => route.fulfill({ json: { defaults, allowed_modes: ['video', 'audio'], allowed_qualities: ['best', '720p'], allowed_formats: ['auto', 'mp4', 'mp3'], destinations: ['default'], worker_count: 1, cookie_file_available: false } }))
   await page.route('**/api/jobs/events', route => route.fulfill({ contentType: 'text/event-stream', body: 'event: jobs\ndata: {"jobs":[]}\n\n' }))
   await page.route('**/api/preview', route => route.fulfill({ json: { source_url: 'https://www.youtube.com/playlist?list=PLtestPlaylist123', kind: 'playlist', title: 'My playlist', items: [item(1), item(2), item(3)], total_items: 3 } }))
 })
@@ -90,7 +90,8 @@ test('uses the reference window structure and opens the server folder chooser', 
   await expect(page.getByLabel('Save location')).toHaveValue('Downloads')
   await page.getByText('More ways to customize', { exact: false }).click()
   await expect(page.getByRole('heading', { name: 'Subtitles & captions' })).toBeVisible()
-  await expect(page.getByLabel('Download uploaded subtitles')).toBeDisabled()
+  await expect(page.getByLabel('Download uploaded subtitles')).toBeEnabled()
+  await expect(page.getByLabel('Use server cookie file')).toBeDisabled()
 })
 
 for (const url of [
@@ -153,4 +154,31 @@ test('pauses and resumes downloads and exposes completed files', async ({ page }
   await expect(history.getByRole('link', { name: 'Save one.mp4' })).toHaveAttribute('href', '/api/jobs/saved/files/one.mp4')
   await page.setViewportSize({ width: 375, height: 812 })
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+})
+
+
+test('submits advanced settings and keeps them after API validation errors', async ({ page }) => {
+  let submitted: any
+  await page.route('**/api/jobs', route => {
+    submitted = route.request().postDataJSON()
+    return route.fulfill({ status: 422, json: { error: { code: 'validation_error', message: 'Invalid option', details: [] } } })
+  })
+  await preview(page)
+  await page.getByText('More ways to customize', { exact: false }).click()
+  await page.getByLabel('Download uploaded subtitles').check()
+  await page.getByLabel('Subtitle languages', { exact: true }).fill('en, fr')
+  await page.getByLabel('Subtitle format', { exact: true }).selectOption('srt')
+  await page.getByLabel('Retries', { exact: true }).fill('5')
+  await page.getByLabel('Rate limit (bytes per second)', { exact: true }).fill('1048576')
+  await page.getByLabel('Additional HTTP headers').fill('Accept-Language: en')
+  await page.getByLabel('--prefer-free-formats', { exact: true }).check()
+  await page.getByRole('button', { name: 'Add to downloads', exact: true }).click()
+  await expect(page.getByRole('alert')).toContainText('Invalid option')
+  expect(submitted.settings).toMatchObject({ subtitles: true, subtitle_languages: ['en', 'fr'],
+    subtitle_format: 'srt', retry_count: 5, rate_limit: 1048576,
+    http_headers: ['Accept-Language: en'], custom_options: ['--prefer-free-formats'] })
+  await expect(page.getByLabel('Download uploaded subtitles')).toBeChecked()
+  await page.setViewportSize({ width: 375, height: 812 })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+  await page.screenshot({ path: '/tmp/vespertape-m6-mobile.png', fullPage: true })
 })

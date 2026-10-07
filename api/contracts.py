@@ -4,6 +4,8 @@ Times are UTC ISO-8601 strings; durations and ETA are seconds; sizes and
 transfer rates use bytes and bytes/second. Null means unavailable.
 """
 
+import re
+
 from typing import Annotated, Literal
 from urllib.parse import urlsplit
 
@@ -104,6 +106,77 @@ class DownloadSettings(Contract):
     destination: str = "default"
     filename: str | None = None
 
+    subtitles: bool = False
+    automatic_captions: bool = False
+    subtitle_languages: list[str] = Field(default_factory=lambda: ["en"], max_length=20)
+    subtitle_format: Literal["best", "srt", "vtt", "ass"] = "best"
+    embed_subtitles: bool = False
+    embed_metadata: bool = False
+    save_thumbnail: bool = False
+    embed_thumbnail: bool = False
+    embed_chapters: bool = False
+    split_chapters: bool = False
+    remux: Literal["auto", "mp4", "mkv", "webm"] = "auto"
+    use_archive: bool = False
+    playlist_start: int = Field(default=1, ge=1, le=100000, strict=True)
+    playlist_end: int | None = Field(default=None, ge=1, le=100000, strict=True)
+    minimum_duration: int | None = Field(default=None, ge=0, strict=True)
+    maximum_duration: int | None = Field(default=None, ge=0, strict=True)
+    output_template: str | None = Field(default=None, max_length=180)
+    file_conflict: Literal["rename", "skip", "fail"] = "rename"
+    retry_count: int = Field(default=3, ge=0, le=20, strict=True)
+    rate_limit: int | None = Field(default=None, ge=1, le=1000000000, strict=True)
+    fragment_concurrency: int = Field(default=1, ge=1, le=16, strict=True)
+    proxy: str | None = Field(default=None, max_length=2048)
+    http_headers: list[str] = Field(default_factory=list, max_length=10)
+    use_cookie_file: bool = False
+    custom_options: list[Literal["--prefer-free-formats", "--no-playlist", "--playlist-reverse", "--check-formats"]] = Field(default_factory=list, max_length=4)
+
+    @field_validator("subtitle_languages")
+    @classmethod
+    def safe_languages(cls, value):
+        if not value or any(not re.fullmatch(r"(?:all|[a-zA-Z0-9]+(?:-[a-zA-Z0-9]+)*)", language) for language in value):
+            raise ValueError("Use language codes such as en or en-US, or all")
+        return value
+
+    @field_validator("output_template")
+    @classmethod
+    def safe_template(cls, value):
+        if value is None:
+            return None
+        remainder = re.sub(r"%\((?:title|id|uploader|playlist_index)\)(?:0?[1-9][0-9]?d|s|\.[1-9][0-9]{0,2}B)", "field", value)
+        if not remainder.strip() or remainder in (".", "..") or any(c in '/\\<>:"|?*%' or ord(c) < 32 for c in remainder):
+            raise ValueError("Use a filename stem with title, id, uploader, or playlist_index substitutions; no paths or extension")
+        return value
+
+    @field_validator("proxy")
+    @classmethod
+    def safe_proxy(cls, value):
+        if value is None:
+            return None
+        parsed = urlsplit(value)
+        if (parsed.scheme not in ("http", "https", "socks5") or not parsed.hostname
+                or parsed.username is not None or parsed.password is not None
+                or parsed.path not in ("", "/") or parsed.query or parsed.fragment
+                or any(c.isspace() or ord(c) < 32 for c in value) or "\\" in value):
+            raise ValueError("Use an HTTP, HTTPS, or SOCKS5 proxy URL without credentials")
+        parsed.port
+        return value
+
+    @field_validator("http_headers")
+    @classmethod
+    def safe_headers(cls, value):
+        allowed = {"user-agent", "referer", "origin", "accept-language"}
+        seen = set()
+        for line in value:
+            name, separator, content = line.partition(":")
+            name = name.lower()
+            if (not separator or name not in allowed or name in seen or not content.strip()
+                    or len(line) > 2048 or any(ord(c) < 32 or ord(c) == 127 for c in line)):
+                raise ValueError("Use unique User-Agent, Referer, Origin, or Accept-Language headers without control characters")
+            seen.add(name)
+        return value
+
     @field_validator("destination")
     @classmethod
     def known_destination(cls, value: str) -> str:
@@ -133,6 +206,7 @@ class SettingsResponse(Contract):
     allowed_formats: list[str]
     destinations: list[str]
     worker_count: int = Field(ge=1)
+    cookie_file_available: bool = False
 
 
 class CreateJobRequest(UrlRequest):

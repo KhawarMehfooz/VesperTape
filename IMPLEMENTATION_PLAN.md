@@ -12,7 +12,7 @@ Update milestone status and task checkboxes as work is completed.
 | 3. Persistent queue and worker | Done |
 | 4. Core download UI | Done |
 | 5. Download controls and history | Done |
-| 6. Advanced options | Not started |
+| 6. Advanced options | Done |
 | 7. Security and deployment | Not started |
 | 8. Final checks and documentation | Not started |
 
@@ -68,12 +68,12 @@ Update milestone status and task checkboxes as work is completed.
 
 ## 6. Advanced options
 
-- [ ] Add subtitles, metadata, thumbnail, chapters, and remux settings.
-- [ ] Add archive behavior, playlist filters, output templates, and file conflict rules.
-- [ ] Add retry count, rate limit, fragment concurrency, proxy, and HTTP headers.
-- [ ] Add cookie-file configuration using a protected path mounted into the container.
-- [ ] Validate custom yt-dlp options against an allowlist before enqueueing jobs.
-- [ ] Document that browser cookies must be available on the downloader host; they do not come from the user's device.
+- [x] Add subtitles, metadata, thumbnail, chapters, and remux settings.
+- [x] Add archive behavior, playlist filters, output templates, and file conflict rules.
+- [x] Add retry count, rate limit, fragment concurrency, proxy, and HTTP headers.
+- [x] Add cookie-file configuration using a protected path mounted into the container.
+- [x] Validate custom yt-dlp options against an allowlist before enqueueing jobs.
+- [x] Document that browser cookies must be available on the downloader host; they do not come from the user's device.
 
 ## 7. Security and deployment
 

@@ -18,6 +18,31 @@ export interface DownloadSettings {
   format: "auto" | "mp4" | "webm" | "mp3" | "m4a" | "flac" | "wav";
   destination: string;
   filename: string | null;
+  subtitles: boolean;
+  automatic_captions: boolean;
+  subtitle_languages: Array<string>;
+  subtitle_format: "best" | "srt" | "vtt" | "ass";
+  embed_subtitles: boolean;
+  embed_metadata: boolean;
+  save_thumbnail: boolean;
+  embed_thumbnail: boolean;
+  embed_chapters: boolean;
+  split_chapters: boolean;
+  remux: "auto" | "mp4" | "mkv" | "webm";
+  use_archive: boolean;
+  playlist_start: number;
+  playlist_end: number | null;
+  minimum_duration: number | null;
+  maximum_duration: number | null;
+  output_template: string | null;
+  file_conflict: "rename" | "skip" | "fail";
+  retry_count: number;
+  rate_limit: number | null;
+  fragment_concurrency: number;
+  proxy: string | null;
+  http_headers: Array<string>;
+  use_cookie_file: boolean;
+  custom_options: Array<"--prefer-free-formats" | "--no-playlist" | "--playlist-reverse" | "--check-formats">;
 }
 
 export interface ErrorDetail {
@@ -110,6 +135,7 @@ export interface SettingsResponse {
   allowed_formats: Array<string>;
   destinations: Array<string>;
   worker_count: number;
+  cookie_file_available: boolean;
 }
 
 export interface UrlRequest {

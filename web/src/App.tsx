@@ -189,7 +189,7 @@ export default function App() {
     return <article className={`queue-item is-${stateClass}`} key={job.id}>
       <div className="file-icon" aria-hidden="true">{job.status === 'failed' ? '!' : job.settings.mode === 'audio' ? '♫' : '▣'}</div>
       <div><div className="queue-name">{job.title ?? 'New download'}</div>
-        <div className="queue-meta">{job.settings.format.toUpperCase()} · {job.settings.quality} · {job.output_name ?? 'Output pending'}</div>
+        <div className="queue-meta">{job.settings.format.toUpperCase()} · {job.settings.quality} · {job.output_name ?? (job.status === 'complete' ? 'No new files · skipped by archive, filters, or file rules' : 'Output pending')}</div>
         {(job.status === 'downloading' || job.status === 'paused') && <><div className="queue-extra"><progress className="progress" max="100" value={job.progress.percent ?? undefined} aria-label="Download progress" /><span className="queue-meta">{job.progress.percent == null ? 'Size unknown' : `${job.progress.percent.toFixed(1)}%`}</span></div><div className="queue-meta">{job.progress.speed_bytes_per_second !== null && `${(job.progress.speed_bytes_per_second / 1048576).toFixed(2)} MB/s`}{job.progress.eta_seconds !== null && ` · ${Math.ceil(job.progress.eta_seconds)}s remaining`}</div></>}
         {job.status === 'complete' && <div className="completed-files">{(job.output_files ?? (job.output_name ? [job.output_name] : [])).map(filename => <a className="small-btn" key={filename} href={`/api/jobs/${encodeURIComponent(job.id)}/files/${encodeURIComponent(filename)}`} download={filename}>Save {filename}</a>)}</div>}
         {job.error && <div className="queue-meta error">{job.error.message}</div>}
@@ -241,7 +241,7 @@ export default function App() {
               <div className="config-layout">
                 <section className="mode-plate"><div className="plate-head">Save as</div><div className="mode-list">{(['audio', 'video'] as const).filter(value => capabilities.allowed_modes.includes(value)).map(value => <div className="mode" key={value}><input className={`${value}-choice`} type="radio" id={`mode-${value}`} name="download-mode" checked={settings.mode === value} onChange={() => {
                   const available = compatibleFormats(value, capabilities.allowed_formats)
-                  updateSettings({ mode: value, format: (available.includes(settings.format) ? settings.format : available[0] ?? 'auto') as DownloadSettings['format'] })
+                  updateSettings({ mode: value, ...(value === 'audio' ? { remux: 'auto', embed_subtitles: false } : {}), format: (available.includes(settings.format) ? settings.format : available[0] ?? 'auto') as DownloadSettings['format'] })
                 }} /><label htmlFor={`mode-${value}`}><Icon name={value} />{value === 'audio' ? 'Audio' : 'Video'}</label></div>)}</div><div className="fine-print" style={{ marginTop: 8 }}>Choose output type</div></section>
                 <section className="options-plate"><div key={settings.mode} className={`format-panel ${settings.mode}-panel`}>
                   <div className="plate-head">{settings.mode === 'audio' ? 'Audio format & quality' : 'Video quality & format'}</div>
@@ -255,7 +255,7 @@ export default function App() {
                   </div>
                   {settings.mode === 'video' && <label className="check"><input type="checkbox" checked disabled />Merge best audio and video streams</label>}
                   {settings.mode === 'audio' && <div className="fine-print" style={{ marginTop: 8 }}>Uses the best available audio stream.</div>}
-                  <details className="advanced"><summary>Customize {settings.mode}</summary><label className="check"><input type="checkbox" disabled />{settings.mode === 'video' ? 'Include subtitles when available' : 'Keep chapter markers'}</label><label className="check"><input type="checkbox" disabled />{settings.mode === 'video' ? 'Embed thumbnail' : 'Preserve source timestamp'}</label>{settings.mode === 'video' && <label className="check"><input type="checkbox" disabled />Prefer HDR streams</label>}<div className="setting-title" style={{ marginTop: 8 }}>Filename pattern</div><input className="fake-select" readOnly value="%(title)s.%(ext)s" aria-label="Filename pattern" /><div className="adv-note">Custom processing options are not available yet.</div></details>
+
                 </div></section>
               </div>
               {!formats.length && <p className="preview-message error" role="alert">The server has no allowed formats for this mode. Choose another mode.</p>}
@@ -263,8 +263,8 @@ export default function App() {
                 <section className="save-block"><label className="save-label" htmlFor="save-path"><Icon name="folder" />Where should it go?</label><div className="path-row"><input className="url-input" id="save-path" type="text" aria-label="Save location" value={destinationName} readOnly /><button className="bevel-btn" type="button" onClick={() => { setDestinationDraft(settings.destination); locationDialog.current?.showModal() }}>Choose folder</button></div></section>
                 <section className="save-block rename-setting"><div className="save-label"><Icon name="rename" />Give it a name</div><label className="check"><input className="rename-check" type="checkbox" checked={rename} onChange={event => { setRename(event.target.checked); setSubmissionError(null) }} />Choose my own file name</label><input className="url-input rename-input" type="text" aria-label="New file name" value={settings.filename ?? ''} onChange={event => updateSettings({ filename: event.target.value })} placeholder="Enter a new file name" /><div className="save-hint">Leave unchecked to keep the source title.</div></section>
               </div>
+              <AdvancedOptions settings={settings} updateSettings={updateSettings} cookieFileAvailable={capabilities.cookie_file_available} />
             </fieldset>
-            <AdvancedOptions />
             {submissionError && <div className="submission-error" role="alert"><p>{submissionError.message}</p>{submissionError.details.length > 0 && <ul>{submissionError.details.map((detail, index) => <li key={index}>{detail.location.filter(part => part !== 'body').join(' › ')}: {detail.message}</li>)}</ul>}</div>}
             <div className="actionline"><span className="status" role="status"><i />{notice || (!preview ? 'Ready when you are' : !validSelection ? 'Choose a valid playlist selection.' : !selectedItems.some(item => item.formats.length) ? 'No downloadable formats in this selection.' : 'Ready when you are')}</span><span className="fine-print">Saved to {destinationName}</span><button className="bevel-btn primary" disabled={!canSubmit || submitting}><Icon name="download" />{submitting ? 'Adding…' : 'Add to downloads'}</button></div>
           </form>}

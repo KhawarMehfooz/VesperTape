@@ -5,14 +5,15 @@ import fcntl
 import shutil
 from pathlib import Path
 from uuid import UUID
+from yt_dlp.utils import match_filter_func
 
 if __package__:
     from .contracts import ApiError, JobProgress
-    from .preview import PublicYoutubeDL, QuietLogger, validate_target, number
+    from .preview import PublicYoutubeDL, QuietLogger, validate_target, number, cookie_options
     from .errors import ApiException
 else:
     from contracts import ApiError, JobProgress
-    from preview import PublicYoutubeDL, QuietLogger, validate_target, number
+    from preview import PublicYoutubeDL, QuietLogger, validate_target, number, cookie_options
     from errors import ApiException
 
 
@@ -22,7 +23,7 @@ class Interrupted(Exception):
 
 def download_options(job, directory):
     settings = job.settings
-    stem = settings.filename or '%(title).120B'
+    stem = settings.filename or settings.output_template or '%(title).120B'
     # Include original playlist index and media ID to avoid collisions, including
     # when the user chooses a filename for multiple playlist entries.
     template = f'{stem} [%(id)s] %(playlist_index|0)s.%(ext)s'
@@ -33,7 +34,7 @@ def download_options(job, directory):
         'retries': 3, 'fragment_retries': 3, 'extractor_retries': 1,
         'continuedl': True, 'overwrites': False, 'ignoreerrors': False,
         'paths': {'home': str(directory)}, 'outtmpl': template,
-        'restrictfilenames': True,
+        'restrictfilenames': True, 'windowsfilenames': True, 'trim_file_name': 200,
         'download_archive': str(directory / '.archive'),
     }
     if job.selection.item_indices:
@@ -48,6 +49,50 @@ def download_options(job, directory):
         if settings.format != 'auto':
             options['merge_output_format'] = settings.format
             options['postprocessors'] = [{'key': 'FFmpegVideoRemuxer', 'preferedformat': settings.format}]
+    options.update(
+        writesubtitles=settings.subtitles, writeautomaticsub=settings.automatic_captions,
+        subtitleslangs=settings.subtitle_languages, subtitlesformat='best',
+        writethumbnail=settings.save_thumbnail or settings.embed_thumbnail,
+        retries=settings.retry_count, fragment_retries=settings.retry_count,
+        ratelimit=settings.rate_limit, concurrent_fragment_downloads=settings.fragment_concurrency,
+        proxy=settings.proxy or '',
+        http_headers={line.partition(':')[0]: line.partition(':')[2].strip() for line in settings.http_headers},
+        playliststart=settings.playlist_start, playlistend=settings.playlist_end,
+    )
+    if job.selection.item_indices:
+        indices = [i for i in job.selection.item_indices if i >= settings.playlist_start
+                   and (settings.playlist_end is None or i <= settings.playlist_end)]
+        if not indices:
+            raise ApiException(422, 'empty_selection', 'Playlist filters exclude all selected items.')
+        options['playlist_items'] = ','.join(map(str, sorted(indices)))
+    filters = []
+    if settings.minimum_duration is not None:
+        filters.append(f'duration >= {settings.minimum_duration}')
+    if settings.maximum_duration is not None:
+        filters.append(f'duration <= {settings.maximum_duration}')
+    if filters:
+        options['match_filter'] = match_filter_func(' & '.join(filters))
+    processors = options.setdefault('postprocessors', [])
+    if settings.remux != 'auto':
+        processors[:] = [p for p in processors if p['key'] != 'FFmpegVideoRemuxer']
+        processors.append({'key': 'FFmpegVideoRemuxer', 'preferedformat': settings.remux})
+    if settings.subtitle_format != 'best' and (settings.subtitles or settings.automatic_captions):
+        processors.append({'key': 'FFmpegSubtitlesConvertor', 'format': settings.subtitle_format})
+    if settings.embed_subtitles:
+        processors.append({'key': 'FFmpegEmbedSubtitle'})
+    if settings.embed_metadata or settings.embed_chapters:
+        processors.append({'key': 'FFmpegMetadata', 'add_metadata': settings.embed_metadata,
+                           'add_chapters': settings.embed_chapters})
+    if settings.split_chapters:
+        options['outtmpl'] = {'default': template,
+            'chapter': f'{stem} [%(id)s] %(playlist_index|0)s - %(section_number)03d.%(ext)s'}
+        processors.append({'key': 'FFmpegSplitChapters', 'force_keyframes': False})
+    if settings.embed_thumbnail:
+        processors.append({'key': 'EmbedThumbnail', 'already_have_thumbnail': settings.save_thumbnail})
+    for argument in settings.custom_options:
+        key = {'--prefer-free-formats': 'prefer_free_formats', '--no-playlist': 'noplaylist',
+               '--playlist-reverse': 'playlistreverse', '--check-formats': 'check_formats'}[argument]
+        options[key] = True
     return options
 
 
@@ -97,6 +142,12 @@ class WorkerPool:
                 try:
                     output = target.open('xb')
                 except FileExistsError:
+                    rule = job.settings.file_conflict if job else 'rename'
+                    if rule == 'skip':
+                        # Do not create history links to an unrelated existing file.
+                        break
+                    if rule == 'fail':
+                        raise ApiException(409, 'file_conflict', 'A download filename already exists.')
                     index += 1
                     continue
                 try:
@@ -215,23 +266,40 @@ class WorkerPool:
             check_stop()
             directory.mkdir(parents=True, exist_ok=True)
             validate_target(job.source_url)
+            if job.settings.proxy:
+                validate_target(job.settings.proxy.replace('socks5://', 'http://', 1))
             options = download_options(job, directory)
+            archive = self.settings.data_dir / 'download-archive.txt'
+            local_archive = directory / '.archive'
+            if job.settings.use_archive:
+                with self.control_lock:
+                    previous = local_archive.read_text() if local_archive.exists() else ''
+                    shared = archive.read_text() if archive.exists() else ''
+                    local_archive.write_text(shared + previous)
+
             options.update(progress_hooks=[progress], post_hooks=[final_file],
                            postprocessor_hooks=[lambda data: check_stop()])
-            with self.downloader_factory(options) as downloader:
+            with cookie_options(self.settings.cookie_file if job.settings.use_cookie_file else None) as cookies, self.downloader_factory({**options, **cookies}) as downloader:
                 info = downloader.extract_info(job.source_url, download=True)
             check_stop()
             # An empty selection, or playlist consisting only of unavailable
             # entries, must not be reported as a successful download.
             outputs = [path for path in directory.iterdir() if path.is_file() and not path.name.startswith('.') and not path.name.endswith(('.part', '.ytdl', '.temp'))]
-            if not outputs:
+            if not outputs and not (job.settings.use_archive or job.settings.minimum_duration is not None
+                                    or job.settings.maximum_duration is not None):
                 raise RuntimeError('No completed output')
             current = self.store.get(job.id)
             with self.control_lock:
                 check_stop()
-                names = self.publish(job, directory)
+                names = self.publish(job, directory) if outputs else []
+                if job.settings.use_archive and local_archive.exists():
+                    previous = archive.read_text().splitlines() if archive.exists() else []
+                    lines = sorted(set(previous + local_archive.read_text().splitlines()))
+                    temporary = archive.with_suffix('.tmp')
+                    temporary.write_text(''.join(line + '\n' for line in lines if line))
+                    temporary.replace(archive)
                 self.store.update(job.id, expected_status='downloading', status='complete', title=str((info or {}).get('title') or current.title or 'Untitled media'),
-                    output_name=names[-1], output_files=names, output_directory='root',
+                    output_name=names[-1] if names else None, output_files=names, output_directory='root',
                     progress=current.progress.model_copy(update={'percent': 100, 'speed_bytes_per_second': None, 'eta_seconds': None}), error=None)
             shutil.rmtree(directory)
         except Exception as error:
