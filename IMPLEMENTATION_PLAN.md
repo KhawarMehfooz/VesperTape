@@ -7,7 +7,7 @@ Update milestone status and task checkboxes as work is completed.
 | Milestone | Status |
 | --- | --- |
 | 0. Project scaffold | Done |
-| 1. API and configuration | Not started |
+| 1. API and configuration | Done |
 | 2. Link preview | Not started |
 | 3. Persistent queue and worker | Not started |
 | 4. Core download UI | Not started |
@@ -28,10 +28,10 @@ Update milestone status and task checkboxes as work is completed.
 
 ## 1. API and configuration
 
-- [ ] Define shared API response and request shapes for previews, settings, jobs, and errors.
-- [ ] Add typed application settings for data paths, download paths, worker count, and allowed options.
-- [ ] Add SQLite connection and migration strategy.
-- [ ] Add consistent error responses and request validation.
+- [x] Define shared API response and request shapes for previews, settings, jobs, and errors.
+- [x] Add typed application settings for data paths, download paths, worker count, and allowed options.
+- [x] Add SQLite connection and migration strategy.
+- [x] Add consistent error responses and request validation.
 
 ## 2. Link preview
 
