@@ -14,7 +14,7 @@ Update milestone status and task checkboxes as work is completed.
 | 5. Download controls and history | Done |
 | 6. Advanced options | Done |
 | 7. Security and deployment | Done |
-| 8. Final checks and documentation | Not started |
+| 8. Final checks and documentation | Done |
 
 ## 0. Project scaffold
 
@@ -84,16 +84,10 @@ Update milestone status and task checkboxes as work is completed.
 - [x] Add health checks, graceful shutdown, and recovery for active jobs.
 - [x] Confirm the container runs as a non-root user and document volume permissions.
 
-Verified with 60 API tests, 15 frontend browser tests, the frontend production
-build, and an isolated Compose deployment. Docker checks covered health, bundled
-UI authentication, cross-origin mutation rejection, UID 10001, and persistent
-application/download files after restart. Cooperative interruption and active-job
-recovery are covered by worker tests; live media recovery remains in milestone 8.
-
 ## 8. Final checks and documentation
 
-- [ ] Add API tests for preview, validation, queue state, and job actions.
-- [ ] Add frontend checks for the main flow and job states.
-- [ ] Verify a real video and audio download, including FFmpeg post-processing.
-- [ ] Verify restart recovery and persistent files with Docker Compose.
-- [ ] Document setup, configuration, supported behavior, updates, and troubleshooting.
+- [x] Add API tests for preview, validation, queue state, and job actions.
+- [x] Add frontend checks for the main flow and job states.
+- [x] Verify a real video and audio download, including FFmpeg post-processing.
+- [x] Verify restart recovery and persistent files with Docker Compose.
+- [x] Document setup, configuration, supported behavior, updates, and troubleshooting.

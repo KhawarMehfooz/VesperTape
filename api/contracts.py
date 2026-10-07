@@ -76,6 +76,7 @@ class PreviewItem(Contract):
     duration_seconds: float | None = Field(default=None, ge=0)
     playlist_index: int | None = Field(default=None, ge=1)
     formats: list[MediaFormat] = Field(default_factory=list)
+    formats_checked: bool = True
 
 
 class PreviewResponse(Contract):
@@ -243,6 +244,12 @@ class JobProgress(Contract):
     eta_seconds: float | None = Field(default=None, ge=0)
 
 
+class DownloadedItem(Contract):
+    filename: str
+    title: str
+    thumbnail_url: str | None = None
+
+
 class JobResponse(Contract):
     id: str
     source_url: str
@@ -251,6 +258,10 @@ class JobResponse(Contract):
     selection: PlaylistSelection
     settings: DownloadSettings
     progress: JobProgress
+    thumbnail_url: str | None = None
+    playlist_title: str | None = None
+    output_folder: str | None = None
+    downloaded_items: list[DownloadedItem] = Field(default_factory=list)
     output_name: str | None = None
     output_files: list[str] = Field(default_factory=list)
     output_directory: Literal["job", "root"] = "job"

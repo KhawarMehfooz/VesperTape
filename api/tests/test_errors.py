@@ -33,7 +33,7 @@ async def call(app, path, method="GET", body=b""):
         if not messages or messages[0]["status"] != 500:
             raise
     payload = b"".join(message.get("body", b"") for message in messages)
-    return messages[0], json.loads(payload)
+    return messages[0], json.loads(payload) if payload else None
 
 
 class ErrorTests(unittest.TestCase):

@@ -80,6 +80,7 @@ def public_url(value):
 
 
 def item_from_info(info, source_url, index=None):
+    flat = index is not None and info.get('_type') in ('url', 'url_transparent')
     formats = []
     for fmt in info.get('formats') or []:
         if not isinstance(fmt, dict) or not fmt.get('format_id') or not fmt.get('ext'):
@@ -94,10 +95,10 @@ def item_from_info(info, source_url, index=None):
         ))
     return PreviewItem(
         id=str(info.get('id') or index or 'media'),
-        url=public_url(info.get('webpage_url')) or public_url(info.get('original_url')) or source_url,
+        url=public_url(info.get('webpage_url')) or public_url(info.get('original_url')) or public_url(info.get('url')) or source_url,
         title=str(info.get('title') or 'Untitled media'), uploader=info.get('uploader') or info.get('channel'),
         thumbnail_url=public_url(info.get('thumbnail')), duration_seconds=number(info.get('duration')),
-        playlist_index=index, formats=formats,
+        playlist_index=index, formats=formats, formats_checked=not flat,
     )
 
 
@@ -107,7 +108,7 @@ def extract_preview(url: str, cookie_file=None) -> PreviewResponse:
         'quiet': True, 'no_warnings': True, 'logger': QuietLogger(),
         'skip_download': True, 'cachedir': False, 'socket_timeout': 15,
         'retries': 1, 'extractor_retries': 1, 'proxy': '',
-        'js_runtimes': {'node': {}}, 'playlistend': 100,
+        'js_runtimes': {'node': {}}, 'playlistend': 100, 'extract_flat': 'in_playlist',
     }
     try:
         with cookie_options(cookie_file) as cookies, PublicYoutubeDL({**options, **cookies}) as downloader:

@@ -45,6 +45,12 @@ export interface DownloadSettings {
   custom_options: Array<"--prefer-free-formats" | "--no-playlist" | "--playlist-reverse" | "--check-formats">;
 }
 
+export interface DownloadedItem {
+  filename: string;
+  title: string;
+  thumbnail_url: string | null;
+}
+
 export interface ErrorDetail {
   location: Array<string | number>;
   message: string;
@@ -79,6 +85,10 @@ export interface JobResponse {
   selection: PlaylistSelection;
   settings: DownloadSettings;
   progress: JobProgress;
+  thumbnail_url: string | null;
+  playlist_title: string | null;
+  output_folder: string | null;
+  downloaded_items: Array<DownloadedItem>;
   output_name: string | null;
   output_files: Array<string>;
   output_directory: "job" | "root";
@@ -114,6 +124,7 @@ export interface PreviewItem {
   duration_seconds: number | null;
   playlist_index: number | null;
   formats: Array<MediaFormat>;
+  formats_checked: boolean;
 }
 
 export interface PreviewRequest {

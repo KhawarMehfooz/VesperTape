@@ -4,6 +4,7 @@ const defaults = {"mode": "video", "quality": "best", "format": "auto", "destina
 const item = (index: number) => ({ id: String(index), url: `https://example.com/${index}`, title: `Video ${index}`, uploader: 'Uploader', thumbnail_url: null, duration_seconds: 60, playlist_index: index, formats: [{ id: '1', extension: 'mp4', video_codec: 'h264', audio_codec: 'aac', width: 1280, height: 720, filesize_bytes: null }] })
 
 test.beforeEach(async ({ page }) => {
+  await page.route('https://i.ytimg.com/**', route => route.fulfill({ contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="160" height="90"><rect width="160" height="90" fill="#cad7df"/></svg>' }))
   await page.route('**/api/settings', route => route.fulfill({ json: { defaults, allowed_modes: ['video', 'audio'], allowed_qualities: ['best', '720p'], allowed_formats: ['auto', 'mp4', 'mp3'], destinations: ['default'], worker_count: 1, cookie_file_available: false } }))
   await page.route('**/api/jobs/events', route => route.fulfill({ contentType: 'text/event-stream', body: 'event: jobs\ndata: {"jobs":[]}\n\n' }))
   await page.route('**/api/preview', route => route.fulfill({ json: { source_url: 'https://www.youtube.com/playlist?list=PLtestPlaylist123', kind: 'playlist', title: 'My playlist', items: [item(1), item(2), item(3)], total_items: 3 } }))
@@ -131,9 +132,9 @@ test('switches quality controls to audio and restores the chosen video resolutio
   await expect(page.getByLabel('Audio quality', { exact: true })).toHaveCount(0)
 })
 
-test('pauses and resumes downloads and exposes completed files', async ({ page }) => {
-  let job = { id: 'active', title: 'Active video', status: 'downloading', settings: defaults, progress: { percent: 42, speed_bytes_per_second: 1048576, eta_seconds: 9 }, output_name: null, error: null }
-  const saved = { ...job, id: 'saved', title: 'Saved playlist', status: 'complete', output_files: ['one.mp4', 'two.mp4'] }
+test('shows thumbnail lists without Save links and supports pause/resume', async ({ page }) => {
+  let job = { id: 'active', thumbnail_url: 'https://i.ytimg.com/vi/n7Hi2k6aHBw/hqdefault.jpg', title: 'Active video', status: 'downloading', settings: defaults, progress: { percent: 42, speed_bytes_per_second: 1048576, eta_seconds: 9 }, output_name: null, error: null }
+  const saved = { ...job, id: 'saved', title: 'Saved playlist', status: 'complete', output_folder: 'Saved playlist', output_files: ['one.mp4', 'two.mp4'], downloaded_items: [{ filename: 'one.mp4', title: 'First video', thumbnail_url: 'https://i.ytimg.com/vi/n7Hi2k6aHBw/hqdefault.jpg' }, { filename: 'two.mp4', title: 'Second video', thumbnail_url: 'https://i.ytimg.com/vi/YoiPvImmyyQ/hqdefault.jpg' }] }
   await page.route('**/api/jobs/events', route => route.fulfill({ contentType: 'text/event-stream', body: `event: jobs\ndata: ${JSON.stringify({ jobs: [job, saved] })}\n\n` }))
   await page.route('**/api/jobs', route => route.fulfill({ json: { jobs: [job, saved] } }))
   await page.route('**/api/jobs/active/actions', async route => {
@@ -150,8 +151,13 @@ test('pauses and resumes downloads and exposes completed files', async ({ page }
   await active.getByRole('button', { name: 'Resume', exact: true }).click()
   await expect(active).toContainText('QUEUED')
   const history = page.locator('article').filter({ hasText: 'Saved playlist' })
-  await expect(history.getByRole('link')).toHaveCount(2)
-  await expect(history.getByRole('link', { name: 'Save one.mp4' })).toHaveAttribute('href', '/api/jobs/saved/files/one.mp4')
+  await expect(history.getByRole('link')).toHaveCount(0)
+  await expect(history.locator('.saved-items li')).toHaveCount(2)
+  await expect(history.getByRole('img', { name: 'Thumbnail for First video' })).toBeVisible()
+  await expect(history).toContainText('Downloads/Saved playlist')
+  await expect(active.getByRole('img', { name: 'Thumbnail for Active video' })).toBeVisible()
+  const dimensions = await active.locator('.download-thumbnail').boundingBox()
+  expect(dimensions!.width / dimensions!.height).toBeCloseTo(16 / 9, 1)
   await page.setViewportSize({ width: 375, height: 812 })
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
 })
@@ -181,4 +187,63 @@ test('submits advanced settings and keeps them after API validation errors', asy
   await page.setViewportSize({ width: 375, height: 812 })
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
   await page.screenshot({ path: '/tmp/vespertape-m6-mobile.png', fullPage: true })
+})
+
+test('cancels queued work, retries failures, and removes canceled history', async ({ page }) => {
+  const makeJob = (id: string, status: string) => ({ id, title: `${id} video`, status, settings: defaults, updated_at: '2026-10-07T00:00:00Z',
+    progress: { percent: null, speed_bytes_per_second: null, eta_seconds: null }, output_name: null,
+    error: status === 'failed' ? { code: 'download_failed', message: 'Source unavailable' } : null })
+  let jobs = [makeJob('waiting', 'queued'), makeJob('broken', 'failed')]
+  const actions: unknown[] = []
+  await page.route('**/api/jobs/events', route => route.fulfill({ contentType: 'text/event-stream', body: `event: jobs\ndata: ${JSON.stringify({ jobs })}\n\n` }))
+  await page.route('**/api/jobs', route => route.fulfill({ json: { jobs } }))
+  await page.route('**/api/jobs/*/actions', route => {
+    const id = route.request().url().split('/').at(-2)!
+    const { action } = route.request().postDataJSON()
+    actions.push({ id, action })
+    jobs = jobs.map(job => job.id === id ? makeJob(id, action === 'cancel' ? 'canceled' : 'queued') : job)
+    return route.fulfill({ json: jobs.find(job => job.id === id) })
+  })
+  await page.route('**/api/jobs/waiting', route => {
+    expect(route.request().method()).toBe('DELETE')
+    jobs = jobs.filter(job => job.id !== 'waiting')
+    return route.fulfill({ status: 204 })
+  })
+  await page.goto('/')
+  const waiting = page.locator('article').filter({ hasText: 'waiting video' })
+  const broken = page.locator('article').filter({ hasText: 'broken video' })
+  await expect(broken).toContainText('Source unavailable')
+  await waiting.getByRole('button', { name: 'Cancel', exact: true }).click()
+  await expect(waiting).toContainText('CANCELED')
+  await broken.getByRole('button', { name: 'Retry', exact: true }).click()
+  await expect(broken).toContainText('QUEUED')
+  await expect(broken).not.toContainText('Source unavailable')
+  await waiting.getByRole('button', { name: 'Remove', exact: true }).click()
+  await expect(waiting).toHaveCount(0)
+  expect(actions).toEqual([{ id: 'waiting', action: 'cancel' }, { id: 'broken', action: 'retry' }])
+})
+
+test('allows flat playlist selection and explains deferred format checks', async ({ page }) => {
+  await page.route('**/api/preview', route => route.fulfill({ json: {
+    source_url: 'https://www.youtube.com/playlist?list=PLtestPlaylist123', kind: 'playlist',
+    title: 'My playlist', total_items: 51,
+    items: [1, 2, 3].map(index => ({ ...item(index), formats: [], formats_checked: false })),
+  } }))
+  await preview(page)
+  await expect(page.getByText('Playlist listed. Availability and formats are checked when downloading.')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Add to downloads', exact: true })).toBeEnabled()
+  await page.getByRole('combobox', { name: 'Playlist download selection', exact: true }).selectOption('one')
+  await page.getByRole('spinbutton', { name: 'First playlist item', exact: true }).fill('2')
+  await expect(page.getByRole('button', { name: 'Add to downloads', exact: true })).toBeEnabled()
+})
+
+test('shows a timeout instead of leaving preview loading indefinitely', async ({ page }) => {
+  await page.clock.install()
+  await page.route('**/api/preview', () => {})
+  await page.goto('/')
+  await page.getByLabel('Video link', { exact: true }).fill('https://youtu.be/dQw4w9WgXcQ')
+  await page.getByRole('button', { name: 'Preview', exact: true }).click()
+  await page.clock.fastForward(30001)
+  await expect(page.getByRole('alert')).toContainText('Preview took too long')
+  await expect(page.getByRole('button', { name: 'Preview', exact: true })).toBeEnabled()
 })

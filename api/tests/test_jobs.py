@@ -11,7 +11,7 @@ from api.contracts import CreateJobRequest
 from api.database import Database
 from api.jobs import JobStore
 from api.settings import AppSettings
-from api.worker import WorkerPool, download_options
+from api.worker import WorkerPool, download_options, PlaylistLogger
 from api.tests.test_errors import call
 
 
@@ -137,6 +137,116 @@ class QueueTests(unittest.TestCase):
         self.assertEqual(saved.status, 'failed')
         self.assertEqual(saved.error.code, 'download_failed')
         self.assertNotIn('secret-token', saved.model_dump_json())
+
+    def test_playlist_unavailable_item_does_not_discard_completed_downloads(self):
+        job = self.store.create(CreateJobRequest(url='https://www.youtube.com/playlist?list=PLtest123'))
+        class Downloader:
+            def __init__(self, options):
+                self.options = options
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                pass
+            def extract_info(self, url, download):
+                assert self.options['ignoreerrors'] is True
+                self.options['logger'].error('ERROR: [youtube] secret-id: Video unavailable')
+                output = Path(self.options['paths']['home']) / 'episode43.webm'
+                output.write_bytes(b'media')
+                self.options['post_hooks'][0](str(output))
+                return {'title': 'Series'}
+        pool = WorkerPool(self.store, self.settings, Downloader)
+        with patch('api.worker.validate_target'):
+            pool.process(self.store.claim())
+        saved = self.store.get(job.id)
+        self.assertEqual(saved.status, 'complete')
+        self.assertEqual(saved.output_files, ['episode43.webm'])
+        self.assertEqual(saved.error.code, 'playlist_items_skipped')
+        self.assertNotIn('secret-id', saved.model_dump_json())
+        self.assertIn('1 unavailable', saved.error.message)
+
+    def test_playlist_logger_keeps_transport_and_verification_failures(self):
+        for message, code in [('HTTP Error 403: secret', 'download_failed'),
+                              ("Sign in to confirm you're not a bot: secret", 'youtube_verification_required'),
+                              ('HTTP Error 429: secret', 'source_rate_limited')]:
+            with self.subTest(code=code):
+                logger = PlaylistLogger()
+                logger.error(message)
+                self.assertEqual(logger.unavailable, 0)
+                self.assertEqual(logger.failure.code, code)
+                self.assertNotIn('secret', logger.failure.model_dump_json())
+
+    def test_playlist_folder_and_current_item_thumbnails(self):
+        job = self.store.create(CreateJobRequest(url='https://www.youtube.com/playlist?list=PLtest123'))
+        store = self.store
+        class Downloader:
+            def __init__(self, options):
+                self.options = options
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                pass
+            def extract_info(self, url, download):
+                for index in (1, 2):
+                    thumbnail = f'https://i.ytimg.com/vi/video{index}/hqdefault.jpg'
+                    self.options['progress_hooks'][0]({'status': 'finished',
+                        'info_dict': {'title': f'Episode {index}', 'thumbnail': thumbnail,
+                                      'playlist_title': 'Series: A / B'}})
+                    current = store.get(job.id)
+                    assert current.title == f'Episode {index}'
+                    assert current.thumbnail_url == thumbnail
+                    output = Path(self.options['paths']['home']) / f'episode{index}.mp4'
+                    output.write_bytes(b'media')
+                    self.options['post_hooks'][0](str(output))
+                return {'_type': 'playlist', 'title': 'Series: A / B'}
+        pool = WorkerPool(self.store, self.settings, Downloader)
+        with patch('api.worker.validate_target'):
+            pool.process(self.store.claim())
+        saved = self.store.get(job.id)
+        self.assertEqual(saved.status, 'complete')
+        self.assertEqual(saved.output_folder, 'Series_ A _ B')
+        self.assertEqual([item.title for item in saved.downloaded_items], ['Episode 1', 'Episode 2'])
+        for name in saved.output_files:
+            self.assertTrue((self.settings.download_dir / saved.output_folder / name).is_file())
+            self.assertFalse((self.settings.download_dir / name).exists())
+
+    def test_completed_playlist_migration_and_folder_file_access(self):
+        from api.main import app, completed_file
+        from api.errors import ApiException
+        job = self.store.create(CreateJobRequest(url='https://www.youtube.com/playlist?list=PLtest123'))
+        name = 'Episode_1 [n7Hi2k6aHBw] 1.mp4'
+        (self.settings.download_dir / name).write_bytes(b'media')
+        self.store.update(job.id, status='complete', title='Series', output_files=[name],
+                          output_name=name, output_directory='root')
+        pool = WorkerPool(self.store, self.settings)
+        pool.migrate_outputs()
+        pool.migrate_outputs()
+        saved = self.store.get(job.id)
+        self.assertEqual(saved.output_folder, 'Series')
+        self.assertEqual(saved.downloaded_items[0].title, 'Episode 1')
+        self.assertEqual(saved.downloaded_items[0].thumbnail_url, 'https://i.ytimg.com/vi/n7Hi2k6aHBw/hqdefault.jpg')
+        app.state.jobs, app.state.settings = self.store, self.settings
+        self.assertEqual(completed_file(job.id, name).path, self.settings.download_dir / 'Series' / name)
+        self.store.update(job.id, output_folder='../escape')
+        with self.assertRaises(ApiException):
+            completed_file(job.id, name)
+
+    def test_playlist_folder_rejects_symlinks_and_preserves_collision(self):
+        job = self.enqueue()
+        directory = self.settings.data_dir / 'work' / job.id
+        directory.mkdir(parents=True)
+        (directory / 'episode.mp4').write_bytes(b'new')
+        destination = self.settings.download_dir / 'Series'
+        destination.symlink_to(self.settings.data_dir, target_is_directory=True)
+        job.output_folder = 'Series'
+        pool = WorkerPool(self.store, self.settings)
+        with self.assertRaises(RuntimeError):
+            pool.publish(job, directory)
+        destination.unlink()
+        destination.mkdir()
+        (destination / 'episode.mp4').write_bytes(b'original')
+        names = pool.publish(job, directory)
+        self.assertEqual(names, ['episode (1).mp4'])
+        self.assertEqual((destination / 'episode.mp4').read_bytes(), b'original')
 
     def test_shutdown_requeues_and_exclusive_process_ownership(self):
         job = self.enqueue()
@@ -303,6 +413,34 @@ class QueueTests(unittest.TestCase):
         self.assertTrue((directory / 'media.mp4').exists())
         with self.assertRaises(ApiException):
             completed_file(job.id, 'media.mp4')
+
+    def test_http_control_lifecycle_and_terminal_removal(self):
+        from api.main import app
+        app.state.jobs = self.store
+        app.state.settings = self.settings
+        app.state.workers = WorkerPool(self.store, self.settings)
+        job = self.enqueue()
+
+        async def run():
+            start, _ = await call(app, f'/api/jobs/{job.id}', 'DELETE')
+            self.assertEqual(start['status'], 409)
+            for action, expected in [('pause', 'paused'), ('resume', 'queued'),
+                                     ('cancel', 'canceled'), ('retry', 'queued')]:
+                start, payload = await call(app, f'/api/jobs/{job.id}/actions', 'POST',
+                                            json.dumps({'action': action}).encode())
+                self.assertEqual(start['status'], 200)
+                self.assertEqual(payload['status'], expected)
+                self.assertEqual(self.store.get(job.id).status, expected)
+            start, _ = await call(app, f'/api/jobs/{job.id}/actions', 'POST', b'{"action":"retry"}')
+            self.assertEqual(start['status'], 409)
+            start, _ = await call(app, f'/api/jobs/{job.id}/actions', 'POST', b'{"action":"unknown"}')
+            self.assertEqual(start['status'], 422)
+            await call(app, f'/api/jobs/{job.id}/actions', 'POST', b'{"action":"cancel"}')
+            start, _ = await call(app, f'/api/jobs/{job.id}', 'DELETE')
+            self.assertEqual(start['status'], 204)
+            start, _ = await call(app, f'/api/jobs/{job.id}')
+            self.assertEqual(start['status'], 404)
+        asyncio.run(run())
 
     def test_flat_outputs_migration_collision_and_internal_partials(self):
         from api.main import app, completed_file

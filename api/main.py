@@ -127,6 +127,10 @@ def completed_file(job_id: str, filename: str):
     names = job.output_files or ([job.output_name] if job.output_name else [])
     root = app.state.settings.download_dir.resolve()
     directory = root if job.output_directory == 'root' else root / job.id
+    if job.output_directory == 'root' and job.output_folder:
+        if Path(job.output_folder).name != job.output_folder or job.output_folder in ('.', '..'):
+            raise ApiException(404, 'not_found', 'Completed file not found')
+        directory = root / job.output_folder
     path = directory / filename
     if (filename not in names or Path(filename).name != filename
             or directory.is_symlink() or path.is_symlink()

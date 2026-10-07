@@ -1,7 +1,9 @@
-type IconName = 'audio' | 'video' | 'paste' | 'preview' | 'folder' | 'rename' | 'download' | 'queue'
+type IconName = 'audio' | 'video' | 'paste' | 'preview' | 'folder' | 'rename' | 'download' | 'queue' | 'check' | 'warning'
 
 export default function Icon({ name }: { name: IconName }) {
   return <svg className="icon" viewBox="0 0 24 24" aria-hidden="true">
+    {name === 'check' && <path d="m5 12 4 4L19 6" />}
+    {name === 'warning' && <><path d="M12 3 2 21h20L12 3Z" /><path d="M12 9v5m0 3v1" /></>}
     {name === 'audio' && <><path d="M9 18V5l12-2v13M9 9l12-2" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" /></>}
     {name === 'video' && <><rect x="3" y="5" width="18" height="14" rx="2" /><path d="m10 9 5 3-5 3z" /></>}
     {name === 'paste' && <><path d="M8 5H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2M9 3h6l1 3H8l1-3Z" /><path d="M13 15h7m-3-3 3 3-3 3" /></>}

@@ -72,7 +72,8 @@ export default function App() {
 
   const selectedItems = preview?.items.filter(item => mode === 'all' || selection.item_indices.includes(item.playlist_index ?? 1)) ?? []
   const formats = settings && capabilities ? compatibleFormats(settings.mode, capabilities.allowed_formats) : []
-  const canSubmit = !linkError && !!preview && !!settings && validSelection && selectedItems.some(item => item.formats.length > 0) && formats.includes(settings.format)
+  const selectionHasMedia = selectedItems.some(item => item.formats_checked === false || item.formats.length > 0)
+  const canSubmit = !linkError && !!preview && !!settings && validSelection && selectionHasMedia && formats.includes(settings.format)
 
   function updateSettings(patch: Partial<DownloadSettings>) {
     setSettings(current => current ? { ...current, ...patch } : current)
@@ -127,6 +128,8 @@ export default function App() {
     const controller = new AbortController()
     abort.current = controller
     setLoading(true)
+    let timedOut = false
+    const timeout = window.setTimeout(() => { timedOut = true; controller.abort() }, 30000)
     try {
       const response = await fetch('/api/preview', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -143,8 +146,9 @@ export default function App() {
       setStart(data.items[0]?.playlist_index ?? 1)
       setEnd(data.items.at(-1)?.playlist_index ?? 1)
     } catch {
-      if (id === requestId.current) setError('Could not reach the preview service. Please try again.')
+      if (id === requestId.current) setError(timedOut ? 'Preview took too long. Please try again; the source may be slow or unavailable.' : 'Could not reach the preview service. Please try again.')
     } finally {
+      window.clearTimeout(timeout)
       if (id === requestId.current) setLoading(false)
     }
   }
@@ -186,21 +190,35 @@ export default function App() {
   function renderJob(job: JobResponse) {
     const actions: Array<JobActionRequest['action'] | 'remove'> = job.status === 'queued' || job.status === 'downloading' ? ['pause', 'cancel'] : job.status === 'paused' ? ['resume', 'cancel'] : job.status === 'complete' ? ['remove'] : ['retry', 'remove']
     const stateClass = job.status === 'downloading' ? 'active' : job.status
-    return <article className={`queue-item is-${stateClass}`} key={job.id}>
-      <div className="file-icon" aria-hidden="true">{job.status === 'failed' ? '!' : job.settings.mode === 'audio' ? '♫' : '▣'}</div>
-      <div><div className="queue-name">{job.title ?? 'New download'}</div>
-        <div className="queue-meta">{job.settings.format.toUpperCase()} · {job.settings.quality} · {job.output_name ?? (job.status === 'complete' ? 'No new files · skipped by archive, filters, or file rules' : 'Output pending')}</div>
-        {(job.status === 'downloading' || job.status === 'paused') && <><div className="queue-extra"><progress className="progress" max="100" value={job.progress.percent ?? undefined} aria-label="Download progress" /><span className="queue-meta">{job.progress.percent == null ? 'Size unknown' : `${job.progress.percent.toFixed(1)}%`}</span></div><div className="queue-meta">{job.progress.speed_bytes_per_second !== null && `${(job.progress.speed_bytes_per_second / 1048576).toFixed(2)} MB/s`}{job.progress.eta_seconds !== null && ` · ${Math.ceil(job.progress.eta_seconds)}s remaining`}</div></>}
-        {job.status === 'complete' && <div className="completed-files">{(job.output_files ?? (job.output_name ? [job.output_name] : [])).map(filename => <a className="small-btn" key={filename} href={`/api/jobs/${encodeURIComponent(job.id)}/files/${encodeURIComponent(filename)}`} download={filename}>Save {filename}</a>)}</div>}
+    const legacyThumbnail = (filename: string) => {
+      const id = filename.match(/\[([A-Za-z0-9_-]{11})\]/)?.[1]
+      return id ? `https://i.ytimg.com/vi/${id}/hqdefault.jpg` : null
+    }
+    const thumbnail = (url: string | null | undefined, title: string) => <div className="download-thumbnail">
+      {url ? <img src={url} alt={`Thumbnail for ${title}`} loading="lazy" referrerPolicy="no-referrer" onLoad={event => { event.currentTarget.style.visibility = 'visible' }} onError={event => { event.currentTarget.style.visibility = 'hidden' }} /> : <span>Preview unavailable</span>}
+    </div>
+    const files = job.downloaded_items?.length ? job.downloaded_items : (job.output_files ?? []).filter(filename => /\.(mp4|webm|mkv|mp3|m4a|flac|wav|opus|ogg|aac|mov)$/i.test(filename)).map(filename => ({ filename, title: filename.replace(/\s*\[[A-Za-z0-9_-]{11}\].*$/, '').replaceAll('_', ' '), thumbnail_url: legacyThumbnail(filename) }))
+    const mediaFiles = files.filter(file => /\.(mp4|webm|mkv|mp3|m4a|flac|wav|opus|ogg|aac|mov)$/i.test(file.filename)).sort((a, b) => {
+      const index = (filename: string) => Number(filename.match(/\] (\d+)(?: \(\d+\))?\./)?.[1] ?? 0)
+      return index(a.filename) - index(b.filename)
+    })
+    const completed = job.status === 'complete' && mediaFiles.length > 0
+    return <article className={`queue-item is-${stateClass}${completed ? ' has-files' : ''}`} key={job.id}>
+      {!completed && thumbnail(job.thumbnail_url ?? legacyThumbnail(job.output_name ?? (job.source_url ?? '').replace(/.*[?&]v=([A-Za-z0-9_-]{11}).*/, '[$1]')), job.title ?? 'New download')}
+      <div className="download-details"><div className="queue-name">{job.title ?? 'New download'}</div>
+        <div className="queue-meta">{job.settings.mode === 'audio' ? 'Audio' : 'Video'} · {job.settings.quality}{job.output_folder ? ` · Downloads/${job.output_folder}` : ''}{job.status === 'complete' && !files.length ? ' · No new files' : ''}</div>
+        {(job.status === 'downloading' || job.status === 'paused') && <><div className="queue-extra"><progress className="progress" max="100" value={job.progress.percent ?? undefined} aria-label="Download progress" /><span className="queue-meta">{job.progress.percent == null ? 'Preparing download…' : `${job.progress.percent.toFixed(1)}%`}</span></div><div className="queue-meta">{job.progress.speed_bytes_per_second != null && `${(job.progress.speed_bytes_per_second / 1048576).toFixed(2)} MB/s`}{job.progress.eta_seconds != null && ` · ${Math.ceil(job.progress.eta_seconds)}s remaining`}</div></>}
         {job.error && <div className="queue-meta error">{job.error.message}</div>}
       </div>
       <div className="job-controls"><div className={`queue-state is-${stateClass}`}>{job.status.toUpperCase()}</div><div className="queue-actions-inline">{actions.map(action => <button className="small-btn" key={action} disabled={busyJobs.has(job.id)} onClick={() => void controlJob(job, action)}>{action[0].toUpperCase() + action.slice(1)}</button>)}</div></div>
+      {completed && <ul className="saved-items">{mediaFiles.map(file => <li key={file.filename}>
+        {thumbnail(file.thumbnail_url, file.title)}<div className="download-details"><div className="queue-name">{!job.output_folder && mediaFiles.length === 1 ? job.title ?? file.title : file.title}</div><div className="queue-meta">{file.filename.split('.').at(-1)?.toUpperCase()} · Saved</div></div>
+      </li>)}</ul>}
     </article>
   }
 
   return (
     <main className="shell">
-      <header className="brand-header"><h1>VesperTape</h1></header>
       <section className="variant variant-a" aria-label="Classic Download Window"><div className="skin">
         <div className="titlebar"><div className="title-name"><span className="mark">✣</span> VESPERTAPE DOWNLOAD MANAGER</div><div className="window-buttons" aria-hidden="true"><i /><i /><i /></div></div>
         <div className="well">
@@ -218,11 +236,11 @@ export default function App() {
               } catch { setToast('Paste your video link into the box above.') }
             }}><Icon name="paste" />Paste link</button><button className="bevel-btn inspect" disabled={submitting || loading || !url.trim() || !!linkError}><Icon name="preview" />{loading ? 'Inspecting…' : 'Preview'}</button></span>
           </form>
-          <div className="mini-note" aria-live="polite"><span>{loading ? 'Inspecting media and available formats…' : preview ? `${firstItem?.uploader ?? 'Source inspected'}${preview.kind === 'playlist' ? ` · ${preview.total_items ?? preview.items.length} videos detected.` : ''}` : 'Paste a YouTube video or playlist link to get started.'}</span>{preview && <span className="ready-pill"><i />Link ready</span>}</div>
+          <div className="mini-note" aria-live="polite"><span>{loading ? 'Inspecting media and available formats…' : preview ? `${firstItem?.uploader ?? 'Source inspected'}${preview.kind === 'playlist' ? ` · ${preview.total_items ?? preview.items.length} videos detected.` : ''}` : 'Paste a YouTube video or playlist link to get started.'}</span>{preview && <span className="link-status"><Icon name="check" />Link ready</span>}</div>
           {(linkError || error) && <p id="link-error" className="preview-message error" role="alert">{linkError || error}</p>}
           {preview && <div className="preview-reveal"><div className="preview-reveal-content"><article className="source-preview">
             <div className={`preview-art${firstItem?.thumbnail_url ? ' has-image' : ''}`} aria-hidden="true">{firstItem?.thumbnail_url ? <img src={firstItem.thumbnail_url} alt="" referrerPolicy="no-referrer" /> : <span>✣</span>}</div>
-            <div><div className="preview-top"><h3 className="preview-title">{preview.title}</h3><div className="preview-status"><i />{selectedItems.some(item => item.formats.length) ? 'LOOKS GOOD' : 'NO FORMATS'}</div></div><div className="preview-meta">{firstItem?.uploader ?? 'Unknown uploader'} · {durationLabel}{firstItem?.formats.some(format => format.height === 1080) && ' · 1080p available'}</div>
+            <div><div className="preview-top"><h3 className="preview-title">{preview.title}</h3><div className={`preview-status${selectionHasMedia ? '' : ' is-warning'}`}><Icon name={selectionHasMedia ? 'check' : 'warning'} />{selectedItems.some(item => item.formats_checked === false) ? 'Playlist listed' : selectionHasMedia ? 'Looks good' : 'No formats'}</div></div><div className="preview-meta">{firstItem?.uploader ?? 'Unknown uploader'} · {durationLabel}{firstItem?.formats.some(format => format.height === 1080) && ' · 1080p available'}</div>
               {preview.kind === 'playlist' && <div className="playlist-row">
                 <div className="setting-title">Playlist · {preview.total_items ?? preview.items.length} items</div>
                 <select className="fake-select" aria-label="Playlist download selection" disabled={submitting} value={mode} onChange={event => { setMode(event.target.value); setSubmissionError(null); setNotice('') }}><option value="one">This video only · {start} of {preview.total_items ?? preview.items.length}</option><option value="all">Entire playlist · {preview.total_items ?? preview.items.length} videos</option><option value="range">Choose a range…</option></select>
@@ -230,7 +248,8 @@ export default function App() {
                 {!validSelection && <div className="error" role="alert">Choose indexes from the preview, with the end at or after the start.</div>}
               </div>}
               {!preview.items.length && <div className="preview-meta" role="status">No playable items were found in this playlist.</div>}
-              {preview.items.length > 0 && !selectedItems.some(item => item.formats.length) && <div className="preview-meta error" role="status">No downloadable formats are available for this item.</div>}
+              {selectedItems.some(item => item.formats_checked === false) && <div className="preview-meta" role="status">Playlist listed. Availability and formats are checked when downloading.</div>}
+              {preview.items.length > 0 && !selectionHasMedia && <div className="preview-meta error" role="status">No downloadable formats are available for this item.</div>}
             </div>
           </article></div></div>}
           <details className="source-feedback"><summary>Help · supported sources and link messages</summary><div className="feedback-list"><span className="good">✓ Link inspected</span><span className="warn">⚠ Playlist detected</span><span className="bad">! Unsupported source</span><span className="bad">! No compatible formats found</span><span className="bad">! Invalid or private link</span><span>… Inspecting source</span></div></details>
@@ -266,7 +285,7 @@ export default function App() {
               <AdvancedOptions settings={settings} updateSettings={updateSettings} cookieFileAvailable={capabilities.cookie_file_available} />
             </fieldset>
             {submissionError && <div className="submission-error" role="alert"><p>{submissionError.message}</p>{submissionError.details.length > 0 && <ul>{submissionError.details.map((detail, index) => <li key={index}>{detail.location.filter(part => part !== 'body').join(' › ')}: {detail.message}</li>)}</ul>}</div>}
-            <div className="actionline"><span className="status" role="status"><i />{notice || (!preview ? 'Ready when you are' : !validSelection ? 'Choose a valid playlist selection.' : !selectedItems.some(item => item.formats.length) ? 'No downloadable formats in this selection.' : 'Ready when you are')}</span><span className="fine-print">Saved to {destinationName}</span><button className="bevel-btn primary" disabled={!canSubmit || submitting}><Icon name="download" />{submitting ? 'Adding…' : 'Add to downloads'}</button></div>
+            <div className="actionline"><span className={`status${notice ? ' is-success' : ''}`} role="status">{notice && <Icon name="check" />}{notice || (!preview ? 'Ready when you are' : !validSelection ? 'Choose a valid playlist selection.' : !selectionHasMedia ? 'No downloadable formats in this selection.' : 'Ready when you are')}</span><span className="fine-print">Saved to {destinationName}</span><button className="bevel-btn primary" disabled={!canSubmit || submitting}><Icon name="download" />{submitting ? 'Adding…' : 'Add to downloads'}</button></div>
           </form>}
         </div>
         <section aria-label="Download queue"><div className="queue-head"><h2><Icon name="queue" />Your downloads</h2><span>{activeJobs.length} in progress</span></div>

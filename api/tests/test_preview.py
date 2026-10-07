@@ -45,6 +45,23 @@ class PreviewTests(unittest.TestCase):
         self.assertEqual(result.total_items, 200)
         self.assertEqual([item.playlist_index for item in result.items], [2, 5])
 
+    def test_playlist_preview_uses_flat_entries_without_claiming_formats(self):
+        with patch('api.preview.socket.getaddrinfo', return_value=PUBLIC), patch('api.preview.PublicYoutubeDL') as factory:
+            downloader = factory.return_value.__enter__.return_value
+            downloader.extract_info.return_value = {
+                '_type': 'playlist', 'title': 'Series', 'playlist_count': 51,
+                'entries': [{'_type': 'url', 'id': 'n7Hi2k6aHBw',
+                             'url': 'https://www.youtube.com/watch?v=n7Hi2k6aHBw',
+                             'title': 'Episode 1', 'playlist_index': 3}],
+            }
+            result = extract_preview('https://www.youtube.com/playlist?list=PLtest123')
+            self.assertEqual(factory.call_args.args[0].get('extract_flat'), 'in_playlist')
+            self.assertEqual(result.items[0].url, 'https://www.youtube.com/watch?v=n7Hi2k6aHBw')
+            self.assertEqual(result.items[0].playlist_index, 3)
+            self.assertFalse(result.items[0].formats_checked)
+            self.assertEqual(result.items[0].formats, [])
+            self.assertEqual(result.total_items, 51)
+
     def test_empty_and_no_format_states(self):
         self.assertEqual(self.extract({'_type': 'playlist', 'entries': []}).items, [])
         result = self.extract({'id': 'empty', 'duration': float('nan'), 'thumbnail': 'file:///secret'})

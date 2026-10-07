@@ -3,18 +3,70 @@ import threading
 import time
 import fcntl
 import shutil
+import re
 from pathlib import Path
 from uuid import UUID
+from urllib.parse import parse_qs, urlsplit
 from yt_dlp.utils import match_filter_func
 
 if __package__:
-    from .contracts import ApiError, JobProgress
-    from .preview import PublicYoutubeDL, QuietLogger, validate_target, number, cookie_options
+    from .contracts import ApiError, JobProgress, DownloadedItem
+    from .preview import PublicYoutubeDL, QuietLogger, validate_target, number, cookie_options, public_url
     from .errors import ApiException
 else:
-    from contracts import ApiError, JobProgress
-    from preview import PublicYoutubeDL, QuietLogger, validate_target, number, cookie_options
+    from contracts import ApiError, JobProgress, DownloadedItem
+    from preview import PublicYoutubeDL, QuietLogger, validate_target, number, cookie_options, public_url
     from errors import ApiException
+
+
+def playlist_folder(title):
+    # A single portable component, bounded in UTF-8 bytes.
+    name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', '_', title).strip(' .')
+    name = name.encode('utf-8')[:180].decode('utf-8', errors='ignore').rstrip(' .') or 'Playlist'
+    if name.split('.')[0].upper() in {'CON', 'PRN', 'AUX', 'NUL', *[f'COM{i}' for i in range(1, 10)], *[f'LPT{i}' for i in range(1, 10)]}:
+        name = '_' + name
+    return name
+
+
+def media_thumbnail(info):
+    thumbnail = public_url(info.get('thumbnail'))
+    media_id = str(info.get('id') or '')
+    return thumbnail or (f'https://i.ytimg.com/vi/{media_id}/hqdefault.jpg'
+                         if re.fullmatch(r'[A-Za-z0-9_-]{11}', media_id) else None)
+
+
+def legacy_items(names):
+    items = []
+    for name in names:
+        if Path(name).suffix.lower() not in {'.mp4', '.webm', '.mkv', '.mp3', '.m4a', '.flac', '.wav', '.opus', '.ogg', '.aac', '.mov'}:
+            continue
+        match = re.search(r'\[([A-Za-z0-9_-]{11})\]', name)
+        title = name[:match.start()].strip().replace('_', ' ') if match else Path(name).stem
+        items.append(DownloadedItem(filename=name, title=title,
+            thumbnail_url=media_thumbnail({'id': match.group(1)}) if match else None))
+    return items
+
+
+class PlaylistLogger(QuietLogger):
+    """Keep safe failure categories, never raw extractor text."""
+    def __init__(self):
+        self.unavailable = 0
+        self.failure = None
+
+    def error(self, message):
+        text = str(message).lower()
+        if "confirm you're not a bot" in text or 'confirm you’re not a bot' in text:
+            self.failure = ApiError(code='youtube_verification_required',
+                message='YouTube requires verification from the downloader server. Server-side cookies may be required.')
+        elif '429' in text or 'too many requests' in text:
+            self.failure = ApiError(code='source_rate_limited',
+                message='YouTube is limiting requests from the downloader server. Wait before retrying.')
+        elif any(phrase in text for phrase in ('video unavailable', 'private video', 'video has been removed',
+                                               'not available in your country', 'members-only')):
+            self.unavailable += 1
+        else:
+            self.failure = ApiError(code='download_failed',
+                message='Could not download this media. Check availability and the selected settings.')
 
 
 class Interrupted(Exception):
@@ -134,10 +186,18 @@ class WorkerPool:
                 or directory.parent != work):
             raise RuntimeError('Unsafe job storage directory')
 
-    def publish(self, job, directory):
+    def publish(self, job, directory, mappings=None):
         """Reserve filenames exclusively so simultaneous/repeated jobs never overwrite."""
         self.check_work_directory(directory)
         names = []
+        destination = self.settings.download_dir
+        if job and job.output_folder:
+            if playlist_folder(job.output_folder) != job.output_folder:
+                raise RuntimeError('Unsafe playlist folder')
+            destination = destination / job.output_folder
+            if destination.is_symlink() or not destination.resolve().is_relative_to(self.settings.download_dir.resolve()):
+                raise RuntimeError('Unsafe playlist folder')
+            destination.mkdir(exist_ok=True)
         sources = [path for path in directory.iterdir() if path.is_file()
                    and not path.is_symlink() and not path.name.startswith('.')
                    and not path.name.endswith(('.part', '.ytdl', '.temp'))]
@@ -147,7 +207,7 @@ class WorkerPool:
             index = 0
             while True:
                 suffix = '' if index == 0 else f' ({index})'
-                target = self.settings.download_dir / f'{source.stem}{suffix}{source.suffix}'
+                target = destination / f'{source.stem}{suffix}{source.suffix}'
                 try:
                     output = target.open('xb')
                 except FileExistsError:
@@ -166,6 +226,8 @@ class WorkerPool:
                     target.unlink(missing_ok=True)
                     raise
                 names.append(target.name)
+                if mappings is not None:
+                    mappings[source.name] = target.name
                 break
         return names
 
@@ -183,6 +245,41 @@ class WorkerPool:
                 if directory.exists():
                     raise RuntimeError('Both legacy and internal job directories exist')
                 shutil.move(str(legacy), str(directory))
+            if job.status == 'complete' and job.output_directory == 'root' and not job.output_folder and 'list' in parse_qs(urlsplit(job.source_url).query):
+                folder = playlist_folder(job.playlist_title or job.title or 'Playlist')
+                target_dir = self.settings.download_dir / folder
+                if target_dir.is_symlink():
+                    raise RuntimeError('Unsafe playlist folder')
+                target_dir.mkdir(exist_ok=True)
+                names = []
+                for name in job.output_files:
+                    source = self.settings.download_dir / name
+                    if Path(name).name != name or source.is_symlink():
+                        raise RuntimeError('Unsafe recorded output')
+                    target = target_dir / name
+                    if source.is_file():
+                        index = 0
+                        while True:
+                            try:
+                                output = target.open('xb')
+                                break
+                            except FileExistsError:
+                                index += 1
+                                target = target_dir / f'{source.stem} ({index}){source.suffix}'
+                        try:
+                            with output, source.open('rb') as input_file:
+                                shutil.copyfileobj(input_file, output)
+                        except Exception:
+                            target.unlink(missing_ok=True)
+                            raise
+                        source.unlink()
+                    elif not target.is_file() or target.is_symlink():
+                        continue
+                    names.append(target.name)
+                job = self.store.update(job.id, output_folder=folder, output_files=names,
+                    output_name=names[-1] if names else None, downloaded_items=legacy_items(names))
+            if job.status == 'complete' and not job.downloaded_items:
+                job = self.store.update(job.id, downloaded_items=legacy_items(job.output_files))
             if job.status == 'complete' and job.output_directory == 'job' and directory.is_dir():
                 names = self.publish(job, directory)
                 self.store.update(job.id, output_directory='root', output_files=names, output_name=names[-1])
@@ -245,6 +342,7 @@ class WorkerPool:
 
     def process(self, job):
         last_write = 0
+        current_media = {}
         directory = self.settings.data_dir / 'work' / job.id
 
         def check_stop():
@@ -252,7 +350,7 @@ class WorkerPool:
                 raise Interrupted()
 
         def progress(data):
-            nonlocal last_write
+            nonlocal last_write, current_media
             check_stop()
             current = time.monotonic()
             if data.get('status') != 'finished' and current - last_write < 0.5:
@@ -261,7 +359,10 @@ class WorkerPool:
             downloaded = number(data.get('downloaded_bytes'), True) or 0
             total = number(data.get('total_bytes') or data.get('total_bytes_estimate'), True)
             info = data.get('info_dict') or {}
+            current_media = info
             self.store.update(job.id, expected_status='downloading', title=str(info.get('title') or job.title or 'Untitled media'),
+                thumbnail_url=media_thumbnail(info),
+                playlist_title=info.get('playlist_title') or job.playlist_title,
                 progress=JobProgress(downloaded_bytes=downloaded, total_bytes=total,
                     percent=min(100, downloaded / total * 100) if total else None,
                     speed_bytes_per_second=number(data.get('speed')), eta_seconds=number(data.get('eta'))))
@@ -273,7 +374,10 @@ class WorkerPool:
                 raise RuntimeError('Output escaped job directory')
             current = self.store.get(job.id)
             self.store.update(job.id, expected_status='downloading', output_name=path.name,
-                output_files=list(dict.fromkeys([*current.output_files, path.name])))
+                output_files=list(dict.fromkeys([*current.output_files, path.name])),
+                downloaded_items=[*[item for item in current.downloaded_items if item.filename != path.name],
+                    DownloadedItem(filename=path.name, title=str(current_media.get('title') or current.title or path.stem),
+                                   thumbnail_url=media_thumbnail(current_media))])
 
         try:
             check_stop()
@@ -283,6 +387,10 @@ class WorkerPool:
             if job.settings.proxy:
                 validate_target(job.settings.proxy.replace('socks5://', 'http://', 1))
             options = download_options(job, directory)
+            playlist_logger = None
+            if 'list' in parse_qs(urlsplit(job.source_url).query) and not options.get('noplaylist'):
+                playlist_logger = PlaylistLogger()
+                options.update(ignoreerrors=True, logger=playlist_logger)
             archive = self.settings.data_dir / 'download-archive.txt'
             local_archive = directory / '.archive'
             if job.settings.use_archive:
@@ -296,6 +404,8 @@ class WorkerPool:
             with cookie_options(self.settings.cookie_file if job.settings.use_cookie_file else None) as cookies, self.downloader_factory({**options, **cookies}) as downloader:
                 info = downloader.extract_info(job.source_url, download=True)
             check_stop()
+            if playlist_logger is not None and playlist_logger.failure is not None:
+                raise ApiException(422, playlist_logger.failure.code, playlist_logger.failure.message)
             # An empty selection, or playlist consisting only of unavailable
             # entries, must not be reported as a successful download.
             outputs = [path for path in directory.iterdir() if path.is_file() and not path.name.startswith('.') and not path.name.endswith(('.part', '.ytdl', '.temp'))]
@@ -303,9 +413,20 @@ class WorkerPool:
                                     or job.settings.maximum_duration is not None):
                 raise RuntimeError('No completed output')
             current = self.store.get(job.id)
+            warning = None
+            if playlist_logger is not None and playlist_logger.unavailable:
+                warning = ApiError(code='playlist_items_skipped',
+                    message=f'Skipped {playlist_logger.unavailable} unavailable playlist item(s). Other selected items were downloaded.')
             with self.control_lock:
                 check_stop()
-                names = self.publish(job, directory) if outputs else []
+                folder = current.output_folder
+                if (info or {}).get('_type') in ('playlist', 'multi_video'):
+                    folder = folder or playlist_folder(str(info.get('title') or current.playlist_title or 'Playlist'))
+                current = self.store.update(job.id, output_folder=folder)
+                mappings = {}
+                names = self.publish(current, directory, mappings) if outputs else []
+                items = [item.model_copy(update={'filename': mappings[item.filename]})
+                         for item in (current.downloaded_items or legacy_items(current.output_files)) if item.filename in mappings]
                 if job.settings.use_archive and local_archive.exists():
                     previous = archive.read_text().splitlines() if archive.exists() else []
                     lines = sorted(set(previous + local_archive.read_text().splitlines()))
@@ -314,7 +435,8 @@ class WorkerPool:
                     temporary.replace(archive)
                 self.store.update(job.id, expected_status='downloading', status='complete', title=str((info or {}).get('title') or current.title or 'Untitled media'),
                     output_name=names[-1] if names else None, output_files=names, output_directory='root',
-                    progress=current.progress.model_copy(update={'percent': 100, 'speed_bytes_per_second': None, 'eta_seconds': None}), error=None)
+                    output_folder=folder, downloaded_items=items,
+                    progress=current.progress.model_copy(update={'percent': 100, 'speed_bytes_per_second': None, 'eta_seconds': None}), error=warning)
             shutil.rmtree(directory)
         except Exception as error:
             if self.stop_event.is_set() or isinstance(error, Interrupted):
