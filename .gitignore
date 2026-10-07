@@ -1,0 +1,12 @@
+# Local design study; keep the working reference out of the repository.
+/vespertape-ui-design-system.html
+
+# Local development
+.env
+.venv/
+__pycache__/
+*.py[cod]
+web/node_modules/
+web/dist/
+data/
+.DS_Store
