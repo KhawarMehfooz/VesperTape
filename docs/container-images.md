@@ -4,7 +4,11 @@ The `Test and publish Docker image` GitHub Actions workflow runs on pushes to
 `master` (including PR merges), pull requests targeting `master`, and manual
 runs. PRs only build and test; publishing is restricted to `master`. API tests,
 generated contract checks, frontend browser tests, and a smoke test of the
-packaged app must pass before publishing.
+packaged app must pass before publishing. Browser tests run in parallel in the
+version-matched official Playwright container, which includes browsers and Linux
+libraries. This avoids installing OS packages from runner mirrors during CI.
+Dependency installation and tests have separate time limits. When updating
+`@playwright/test`, update the container version and digest in the workflow too.
 
 Images are published to `ghcr.io/khawarmehfooz/vespertape` with `latest`, `master`,
 and `sha-<full-commit>` tags. Docker automatically selects AMD64 or ARM64.
