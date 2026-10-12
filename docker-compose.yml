@@ -1,12 +1,65 @@
 services:
-  vespertape:
-    build: .
-    ports:
-      - "${VESPERTAPE_PORT:-8080}:8000"
+  storage-init:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        if [ ! -f /downloads/.vespertape-migrated ]; then
+          if [ -d /data/downloads ]; then
+            python -c '
+        import shutil
+        from pathlib import Path
+        def preserve_existing(source, target):
+            if not Path(target).exists():
+                return shutil.copy2(source, target)
+            return target
+        shutil.copytree("/data/downloads", "/downloads", dirs_exist_ok=True, copy_function=preserve_existing)
+        '
+          fi
+          touch /downloads/.vespertape-migrated
+        fi
+        chown -R "$${OWNER_UID}:$${OWNER_GID}" /data /downloads
     environment:
-      VESPERTAPE_DATA_DIR: /data
+      OWNER_UID: ${VESPERTAPE_UID:-10001}
+      OWNER_GID: ${VESPERTAPE_GID:-10001}
     volumes:
       - vespertape-data:/data
+      - type: bind
+        source: ${VESPERTAPE_HOST_DOWNLOAD_DIR:-./downloads}
+        target: /downloads
+
+  vespertape:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      storage-init:
+        condition: service_completed_successfully
+    user: "${VESPERTAPE_UID:-10001}:${VESPERTAPE_GID:-10001}"
+    ports:
+      - "${VESPERTAPE_BIND_ADDRESS:-127.0.0.1}:${VESPERTAPE_API_PORT:-8000}:8000"
+    environment:
+      VESPERTAPE_DATA_DIR: /data
+      VESPERTAPE_DOWNLOAD_DIR: /downloads
+      VESPERTAPE_ACCESS_PASSWORD: ${VESPERTAPE_ACCESS_PASSWORD:-}
+      VESPERTAPE_WORKER_COUNT: ${VESPERTAPE_WORKER_COUNT:-1}
+      VESPERTAPE_ALLOWED_MODES: '${VESPERTAPE_ALLOWED_MODES:-["video","audio"]}'
+      VESPERTAPE_ALLOWED_QUALITIES: '${VESPERTAPE_ALLOWED_QUALITIES:-["best","1080p","720p","480p"]}'
+      VESPERTAPE_ALLOWED_FORMATS: '${VESPERTAPE_ALLOWED_FORMATS:-["auto","mp4","webm","mp3","m4a","flac","wav"]}'
+    volumes:
+      - vespertape-data:/data
+      - type: bind
+        source: ${VESPERTAPE_HOST_DOWNLOAD_DIR:-./downloads}
+        target: /downloads
+    stop_grace_period: 2m
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     restart: unless-stopped
 
 volumes:

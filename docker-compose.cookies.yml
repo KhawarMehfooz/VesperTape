@@ -1,0 +1,12 @@
+# Optional: docker compose -f docker-compose.yml -f docker-compose.cookies.yml up --build -d
+services:
+  vespertape:
+    environment:
+      VESPERTAPE_COOKIE_FILE: /run/secrets/vespertape-cookies.txt
+    volumes:
+      - type: bind
+        source: ${VESPERTAPE_HOST_COOKIE_FILE:?Set an absolute protected cookie-file path}
+        target: /run/secrets/vespertape-cookies.txt
+        read_only: true
+        bind:
+          create_host_path: false

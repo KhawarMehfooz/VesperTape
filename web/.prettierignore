@@ -1,0 +1,7 @@
+node_modules/
+dist/
+test-results/
+playwright-report/
+package-lock.json
+# Owned by scripts/generate_api_types.py.
+src/api/contracts.ts

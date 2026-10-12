@@ -6,17 +6,22 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "playwright test",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
   },
   "dependencies": {
-    "@vitejs/plugin-react": "latest",
-    "vite": "latest",
-    "typescript": "latest",
-    "react": "latest",
-    "react-dom": "latest"
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
   },
   "devDependencies": {
-    "@types/react": "latest",
-    "@types/react-dom": "latest"
+    "@playwright/test": "1.63.0",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.1.2",
+    "prettier": "3.6.2",
+    "typescript": "7.0.2",
+    "vite": "8.3.3"
   }
 }
