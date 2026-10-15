@@ -64,3 +64,13 @@ export function subscribeToJobs(onJobs: (jobs: JobResponse[]) => void, onDisconn
   feed.onerror = onDisconnected
   return () => feed.close()
 }
+
+export function fileSaveUrl(jobId: string, filename: string) {
+  return `/api/jobs/${encodeURIComponent(jobId)}/files/${encodeURIComponent(filename)}`
+}
+
+export function archiveSaveUrl(jobIds: string[]) {
+  const query = new URLSearchParams()
+  jobIds.forEach((id) => query.append('job_ids', id))
+  return `/api/files/archive?${query}`
+}

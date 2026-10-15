@@ -282,7 +282,7 @@ test('switches quality controls to audio and restores the chosen video resolutio
   await expect(page.getByLabel('Audio quality', { exact: true })).toHaveCount(0)
 })
 
-test('shows thumbnail lists without Save links and supports pause/resume', async ({ page }) => {
+test('offers single and bulk saves and supports pause/resume', async ({ page }) => {
   let job = {
     id: 'active',
     thumbnail_url: 'https://i.ytimg.com/vi/n7Hi2k6aHBw/hqdefault.jpg',
@@ -334,7 +334,10 @@ test('shows thumbnail lists without Save links and supports pause/resume', async
   await active.getByRole('button', { name: 'Resume', exact: true }).click()
   await expect(active).toContainText('QUEUED')
   const history = page.locator('article').filter({ hasText: 'Saved playlist' })
-  await expect(history.getByRole('link')).toHaveCount(0)
+  await expect(history.getByRole('link', { name: 'Save to device' })).toHaveCount(2)
+  await expect(history.getByRole('link', { name: 'Save to device' }).first()).toHaveAttribute('href', '/api/jobs/saved/files/one.mp4')
+  await expect(history.getByRole('link', { name: 'Save all as ZIP' })).toHaveAttribute('href', '/api/files/archive?job_ids=saved')
+  await expect(page.getByRole('region', { name: 'Recent downloads' }).getByRole('link', { name: 'Save all as ZIP' })).toHaveCount(2)
   await expect(history.locator('.saved-items li')).toHaveCount(2)
   await expect(history.getByRole('img', { name: 'Thumbnail for First video' })).toBeVisible()
   await expect(history).toContainText('Downloads/Saved playlist')

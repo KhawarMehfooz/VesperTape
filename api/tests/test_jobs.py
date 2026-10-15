@@ -380,6 +380,33 @@ class QueueTests(unittest.TestCase):
             if action == 'pause':
                 pool.action(job.id, 'cancel')
 
+    def test_bulk_save_preserves_duplicates_and_rejects_unsafe_paths(self):
+        import zipfile
+        from api.main import app, save_archive
+        from api.errors import ApiException
+        app.state.jobs = self.store
+        app.state.settings = self.settings
+        jobs = [self.enqueue(), self.enqueue()]
+        for index, job in enumerate(jobs):
+            directory = self.settings.download_dir / job.id
+            directory.mkdir()
+            (directory / 'media.mp4').write_bytes(str(index).encode())
+            self.store.update(job.id, status='complete', output_files=['media.mp4'])
+        response = save_archive([jobs[0].id, jobs[1].id, jobs[0].id])
+        with zipfile.ZipFile(response.path) as archive:
+            self.assertEqual(len(archive.namelist()), 2)
+            for index, job in enumerate(jobs):
+                self.assertEqual(archive.read(f'{job.id}/media.mp4'), str(index).encode())
+        asyncio.run(response.background())
+        self.assertFalse(Path(response.path).exists())
+        directory = self.settings.download_dir / jobs[0].id
+        (directory / 'media.mp4').unlink()
+        (directory / 'media.mp4').symlink_to(self.database.path)
+        with self.assertRaises(ApiException):
+            save_archive([jobs[0].id])
+        with self.assertRaises(ApiException):
+            save_archive([self.enqueue().id])
+
     def test_action_http_and_safe_file_retrieval(self):
         from api.main import app, completed_file
         from api.errors import ApiException

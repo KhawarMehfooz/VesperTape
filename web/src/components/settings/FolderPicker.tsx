@@ -28,10 +28,11 @@ export default function FolderPicker({ destination, destinations, onChange }: Pr
             <div className="dialog-heading">
               <span className="dialog-folder">✦</span>
               <div>
-                <h2 id="location-title">Choose a cozy spot</h2>
+                <h2 id="location-title">Choose server storage</h2>
                 <p>
-                  Docker maps these folder names to locations you choose during setup. Works on
-                  Windows, macOS, and Linux.
+                  These folders are on the downloader server. With Docker, a host folder must be
+                  mounted during setup. To save to your computer, use Save to device after
+                  downloading.
                 </p>
               </div>
             </div>

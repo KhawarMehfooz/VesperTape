@@ -24,7 +24,7 @@ export default function SaveSettings({
       <section className="save-block">
         <label className="save-label" htmlFor="save-path">
           <Icon name="folder" />
-          Where should it go?
+          Server storage folder
         </label>
         <div className="path-row">
           <input
@@ -40,6 +40,10 @@ export default function SaveSettings({
             destinations={destinations}
             onChange={(destination) => onChange({ destination })}
           />
+        </div>
+        <div className="save-hint">
+          Files download to the server first. Use Save to device in Recent downloads to save them on
+          your computer.
         </div>
       </section>
       <section className="save-block rename-setting">
