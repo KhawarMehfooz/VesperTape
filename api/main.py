@@ -1,10 +1,13 @@
 import asyncio
+import tempfile
+import zipfile
 from pathlib import Path
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Query
 from fastapi.responses import FileResponse, StreamingResponse, Response
 from fastapi.staticfiles import StaticFiles
+from starlette.background import BackgroundTask
 
 if __package__:
     from .security import AccessProtection
@@ -139,6 +142,32 @@ def completed_file(job_id: str, filename: str):
         raise ApiException(404, 'not_found', 'Completed file not found')
     return FileResponse(path, filename=filename, media_type='application/octet-stream',
                         headers={'X-Content-Type-Options': 'nosniff'})
+
+
+@app.get("/api/files/archive", response_class=FileResponse)
+def save_archive(job_ids: list[str] = Query(...)):
+    # Validate every file through the same ownership and path checks as single saves.
+    entries = []
+    for job_id in dict.fromkeys(job_ids):
+        job = app.state.jobs.get(job_id)
+        if job.status != 'complete':
+            raise ApiException(409, 'invalid_job_state', 'Files are available after the download completes')
+        for name in job.output_files or ([job.output_name] if job.output_name else []):
+            response = completed_file(job_id, name)
+            entries.append((response.path, f"{job_id}/{name}"))
+    if not entries:
+        raise ApiException(404, 'not_found', 'No completed files to save')
+    with tempfile.NamedTemporaryFile(suffix='.zip', delete=False) as temporary:
+        archive = Path(temporary.name)
+    try:
+        with zipfile.ZipFile(archive, 'w', compression=zipfile.ZIP_STORED, allowZip64=True) as bundle:
+            for path, name in entries:
+                bundle.write(path, arcname=name)
+    except BaseException:
+        archive.unlink(missing_ok=True)
+        raise
+    return FileResponse(archive, filename='vespertape-downloads.zip', media_type='application/zip',
+                        background=BackgroundTask(archive.unlink, missing_ok=True))
 
 
 @app.get("/api/health", response_model=HealthResponse)

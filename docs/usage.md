@@ -140,3 +140,15 @@ and [post-processing options](https://github.com/yt-dlp/yt-dlp#post-processing-o
 - [Setup and storage](setup.md)
 - [Configuration](configuration.md)
 - [Troubleshooting](troubleshooting.md)
+
+### Save completed files to your computer
+
+Completed media includes a **Save to device** action. Your browser saves the file
+using its download preferences (enable “Ask where to save each file” in your browser
+if you want to choose a location each time). Multi-file jobs and Recent downloads
+also offer **Save all as ZIP**. Archives group files by job ID to preserve duplicate
+names. Saving keeps the server originals available.
+
+The **Server storage folder** setting controls storage on the downloader host;
+in Docker it requires a host bind mount to appear directly in a local folder.
+It does not select a folder on the computer viewing the website.

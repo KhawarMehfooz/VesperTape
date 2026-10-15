@@ -1,8 +1,13 @@
 import type { useJobs } from '../../hooks/useJobs'
 import Icon from '../Icon'
+import { archiveSaveUrl } from '../../api/client'
+import { downloadedMedia } from '../../utils/media'
 import DownloadItem from './DownloadItem'
 
 export default function DownloadLists({ queue }: { queue: ReturnType<typeof useJobs> }) {
+  const savable = queue.recent.filter(
+    (job) => job.status === 'complete' && downloadedMedia(job).length > 0,
+  )
   const row = (job: (typeof queue.active)[number]) => (
     <DownloadItem
       key={job.id}
@@ -40,6 +45,11 @@ export default function DownloadLists({ queue }: { queue: ReturnType<typeof useJ
         <div className="queue-head">
           <h2 className="history-title">Recent downloads</h2>
           <span>{queue.recent.length} items</span>
+          {savable.length > 0 && (
+            <a className="small-btn" href={archiveSaveUrl(savable.map((job) => job.id))} download>
+              Save all as ZIP
+            </a>
+          )}
         </div>
         {queue.recent.map(row)}
         {!queue.recent.length && (

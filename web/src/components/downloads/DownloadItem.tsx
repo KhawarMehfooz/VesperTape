@@ -1,5 +1,5 @@
 import type { JobResponse } from '../../api/contracts'
-import type { JobAction } from '../../api/client'
+import { archiveSaveUrl, fileSaveUrl, type JobAction } from '../../api/client'
 import { downloadedMedia, jobThumbnail } from '../../utils/media'
 import Thumbnail from '../Thumbnail'
 
@@ -61,6 +61,11 @@ export default function DownloadItem({ job, busy, onAction }: Props) {
       <div className="job-controls">
         <div className={`queue-state is-${stateClass}`}>{job.status.toUpperCase()}</div>
         <div className="queue-actions-inline">
+          {completed && files.length > 1 && (
+            <a className="small-btn" href={archiveSaveUrl([job.id])} download>
+              Save all as ZIP
+            </a>
+          )}
           {actionsByStatus[job.status].map((action) => (
             <button
               className="small-btn"
@@ -85,9 +90,12 @@ export default function DownloadItem({ job, busy, onAction }: Props) {
                     : file.title}
                 </div>
                 <div className="queue-meta">
-                  {file.filename.split('.').at(-1)?.toUpperCase()} · Saved
+                  {file.filename.split('.').at(-1)?.toUpperCase()} · On server
                 </div>
               </div>
+              <a className="small-btn" href={fileSaveUrl(job.id, file.filename)} download>
+                Save to device
+              </a>
             </li>
           ))}
         </ul>
